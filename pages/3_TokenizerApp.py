@@ -3,277 +3,338 @@ import pandas as pd
 import nltk
 from nltk.tokenize import sent_tokenize
 import io
-from typing import Dict, Any
+import sys
+import os
+from typing import Dict, Any, Optional
 
-# Download required NLTK data
+# Configure Streamlit page
+st.set_page_config(
+    page_title="Instagram Posts Processor",
+    page_icon="📱",
+    layout="wide"
+)
+
 @st.cache_resource
-def download_nltk_data():
-    """Download NLTK data with caching to avoid repeated downloads"""
+def setup_nltk():
+    """Setup NLTK with proper error handling"""
     try:
-        nltk.download('punkt', quiet=True)
+        # Try to use punkt tokenizer
+        sent_tokenize("Test sentence.")
         return True
-    except Exception as e:
-        st.error(f"Error downloading NLTK data: {e}")
-        return False
+    except LookupError:
+        try:
+            # Download if not available
+            with st.spinner("Downloading language data..."):
+                nltk.download('punkt', quiet=True)
+                nltk.download('punkt_tab', quiet=True)  # For newer NLTK versions
+            sent_tokenize("Test sentence.")
+            return True
+        except Exception as e:
+            st.error(f"Failed to setup NLTK: {e}")
+            return False
 
-def process_instagram_posts(df: pd.DataFrame, column_mapping: Dict[str, str]) -> pd.DataFrame:
-    """
-    Process Instagram posts by tokenizing captions into individual sentences.
+def safe_sent_tokenize(text: str) -> list:
+    """Safely tokenize text with fallback"""
+    if not text or pd.isna(text):
+        return []
     
-    Args:
-        df: Input DataFrame
-        column_mapping: Dictionary mapping standard names to actual column names
-    
-    Returns:
-        DataFrame with processed data
-    """
-    
-    # Map columns based on user input
-    id_col = column_mapping['id_column']
-    caption_col = column_mapping['caption_column']
-    
-    # Initialize lists for processed data
+    try:
+        return sent_tokenize(str(text))
+    except Exception:
+        # Fallback: simple sentence splitting
+        text = str(text)
+        sentences = []
+        for delimiter in ['. ', '! ', '? ']:
+            text = text.replace(delimiter, delimiter + '<SPLIT>')
+        
+        parts = text.split('<SPLIT>')
+        for part in parts:
+            clean_part = part.strip()
+            if clean_part:
+                sentences.append(clean_part)
+        
+        return sentences if sentences else [str(text)]
+
+def process_posts(df: pd.DataFrame, id_col: str, caption_col: str, min_length: int = 3) -> pd.DataFrame:
+    """Process posts with better error handling"""
     processed_data = []
+    errors = 0
     
-    # Process each row
-    for _, row in df.iterrows():
-        post_id = row[id_col]
-        caption = row[caption_col]
-        
-        # Skip if caption is empty or NaN
-        if pd.isna(caption) or not str(caption).strip():
-            continue
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    total_rows = len(df)
+    
+    for idx, (_, row) in enumerate(df.iterrows()):
+        try:
+            # Update progress
+            progress = (idx + 1) / total_rows
+            progress_bar.progress(progress)
+            status_text.text(f"Processing row {idx + 1} of {total_rows}")
             
-        # Tokenize caption into sentences
-        sentences = sent_tokenize(str(caption))
-        
-        # Create entry for each sentence
-        for sentence_id, sentence in enumerate(sentences, 1):
-            sentence = sentence.strip()
-            if sentence:  # Only add non-empty sentences
-                processed_data.append({
-                    'ID': post_id,
-                    'Sentence ID': sentence_id,
-                    'Context': caption,
-                    'Statement': sentence
-                })
+            post_id = row[id_col]
+            caption = row[caption_col]
+            
+            # Skip empty captions
+            if pd.isna(caption) or not str(caption).strip():
+                continue
+            
+            # Convert to string and clean
+            caption_str = str(caption).strip()
+            
+            # Tokenize into sentences
+            sentences = safe_sent_tokenize(caption_str)
+            
+            # Process each sentence
+            for sentence_id, sentence in enumerate(sentences, 1):
+                sentence = sentence.strip()
+                if len(sentence) >= min_length:
+                    processed_data.append({
+                        'ID': str(post_id),
+                        'Sentence ID': sentence_id,
+                        'Context': caption_str,
+                        'Statement': sentence
+                    })
+                    
+        except Exception as e:
+            errors += 1
+            if errors <= 5:  # Show first 5 errors
+                st.warning(f"Error processing row {idx + 1}: {str(e)}")
     
-    # Create DataFrame
-    df_processed = pd.DataFrame(processed_data)
+    # Clear progress indicators
+    progress_bar.empty()
+    status_text.empty()
     
-    return df_processed
+    if errors > 5:
+        st.warning(f"... and {errors - 5} more errors occurred during processing")
+    
+    return pd.DataFrame(processed_data)
+
+def validate_dataframe(df: pd.DataFrame) -> tuple[bool, str]:
+    """Validate uploaded dataframe"""
+    if df.empty:
+        return False, "The uploaded file is empty"
+    
+    if len(df.columns) < 1:
+        return False, "The file must have at least one column"
+    
+    return True, "Valid"
 
 def main():
-    st.set_page_config(
-        page_title="Instagram Posts Processor",
-        page_icon="📱",
-        layout="wide"
-    )
-    
     st.title("📱 Instagram Posts Processor")
     st.markdown("Convert Instagram posts into individual sentences for analysis")
     
-    # Download NLTK data
-    if not download_nltk_data():
-        st.stop()
+    # Initialize session state
+    if 'processed_data' not in st.session_state:
+        st.session_state.processed_data = None
     
-    # Sidebar for configuration
-    st.sidebar.header("⚙️ Configuration")
+    # Setup NLTK
+    if not setup_nltk():
+        st.error("Failed to setup required language processing tools. Please refresh the page.")
+        st.stop()
     
     # File upload
     uploaded_file = st.file_uploader(
         "Upload your CSV file",
         type=['csv'],
-        help="Upload a CSV file containing Instagram posts data"
+        help="Upload a CSV file containing your posts data"
     )
     
     if uploaded_file is not None:
         try:
-            # Load the data
-            df = pd.read_csv(uploaded_file)
+            # Read CSV with different encodings if needed
+            try:
+                df = pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                try:
+                    df = pd.read_csv(uploaded_file, encoding='latin-1')
+                    st.info("File loaded with latin-1 encoding")
+                except UnicodeDecodeError:
+                    df = pd.read_csv(uploaded_file, encoding='cp1252')
+                    st.info("File loaded with cp1252 encoding")
             
-            st.success(f"✅ File uploaded successfully! Shape: {df.shape}")
+            # Validate dataframe
+            is_valid, message = validate_dataframe(df)
+            if not is_valid:
+                st.error(f"Invalid file: {message}")
+                return
             
-            # Show preview of uploaded data
-            with st.expander("📋 Preview uploaded data", expanded=True):
-                st.dataframe(df.head(10))
+            st.success(f"✅ File loaded successfully! Shape: {df.shape}")
             
-            # Column mapping section
-            st.sidebar.subheader("📊 Column Mapping")
-            st.sidebar.markdown("Map your CSV columns to the required fields:")
+            # Show data preview
+            with st.expander("📋 Data Preview", expanded=True):
+                st.dataframe(df.head(), use_container_width=True)
+                
+                # Show column info
+                st.write("**Column Information:**")
+                col_info = []
+                for col in df.columns:
+                    non_null = df[col].notna().sum()
+                    col_info.append({
+                        'Column': col,
+                        'Type': str(df[col].dtype),
+                        'Non-null': f"{non_null}/{len(df)}",
+                        'Sample': str(df[col].dropna().iloc[0]) if non_null > 0 else "No data"
+                    })
+                st.dataframe(pd.DataFrame(col_info), use_container_width=True)
             
-            available_columns = df.columns.tolist()
+            # Configuration section
+            st.header("⚙️ Configuration")
             
-            # Default mappings
-            default_id = 'shortcode' if 'shortcode' in available_columns else available_columns[0]
-            default_caption = 'caption' if 'caption' in available_columns else (
-                available_columns[1] if len(available_columns) > 1 else available_columns[0]
-            )
+            col1, col2 = st.columns(2)
             
-            id_column = st.sidebar.selectbox(
-                "ID Column (Post identifier)",
-                available_columns,
-                index=available_columns.index(default_id),
-                help="Column containing unique post identifiers"
-            )
+            with col1:
+                # Column selection
+                available_columns = df.columns.tolist()
+                
+                # Smart defaults
+                id_default = next((col for col in available_columns 
+                                 if any(keyword in col.lower() for keyword in ['id', 'shortcode', 'post'])), 
+                                available_columns[0])
+                
+                caption_default = next((col for col in available_columns 
+                                      if any(keyword in col.lower() for keyword in ['caption', 'text', 'content', 'description'])), 
+                                     available_columns[-1] if len(available_columns) > 1 else available_columns[0])
+                
+                id_column = st.selectbox(
+                    "Select ID Column",
+                    available_columns,
+                    index=available_columns.index(id_default),
+                    help="Column containing unique identifiers for each post"
+                )
+                
+                caption_column = st.selectbox(
+                    "Select Caption/Text Column",
+                    available_columns,
+                    index=available_columns.index(caption_default),
+                    help="Column containing the text content to process"
+                )
             
-            caption_column = st.sidebar.selectbox(
-                "Caption Column (Text content)",
-                available_columns,
-                index=available_columns.index(default_caption),
-                help="Column containing the post captions/text"
-            )
-            
-            # Processing options
-            st.sidebar.subheader("🔧 Processing Options")
-            
-            min_sentence_length = st.sidebar.slider(
-                "Minimum sentence length (characters)",
-                min_value=1,
-                max_value=50,
-                value=3,
-                help="Skip sentences shorter than this length"
-            )
-            
-            skip_empty_captions = st.sidebar.checkbox(
-                "Skip posts with empty captions",
-                value=True,
-                help="Exclude posts that have no caption text"
-            )
-            
-            # Column mapping dictionary
-            column_mapping = {
-                'id_column': id_column,
-                'caption_column': caption_column
-            }
+            with col2:
+                # Processing options
+                min_sentence_length = st.number_input(
+                    "Minimum sentence length (characters)",
+                    min_value=1,
+                    max_value=100,
+                    value=3,
+                    help="Skip sentences shorter than this length"
+                )
+                
+                # Show preview of selected columns
+                if id_column != caption_column:
+                    st.write("**Selected Data Preview:**")
+                    preview_df = df[[id_column, caption_column]].head(3)
+                    st.dataframe(preview_df, use_container_width=True)
+                else:
+                    st.warning("⚠️ ID and Caption columns cannot be the same")
             
             # Process button
-            if st.sidebar.button("🚀 Process Data", type="primary"):
-                with st.spinner("Processing Instagram posts..."):
-                    try:
-                        # Create a copy for processing
-                        df_to_process = df.copy()
-                        
-                        # Apply minimum sentence length filter in processing
-                        df_processed = process_instagram_posts(df_to_process, column_mapping)
-                        
-                        # Apply minimum sentence length filter
-                        if min_sentence_length > 1:
-                            df_processed = df_processed[
-                                df_processed['Statement'].str.len() >= min_sentence_length
-                            ]
-                        
-                        if len(df_processed) == 0:
-                            st.warning("⚠️ No sentences were extracted. Please check your data and settings.")
-                        else:
-                            # Display results
-                            st.header("📊 Processing Results")
-                            
-                            # Summary metrics
-                            col1, col2, col3, col4 = st.columns(4)
-                            
-                            with col1:
-                                st.metric("Total Sentences", len(df_processed))
-                            
-                            with col2:
-                                st.metric("Unique Posts", df_processed['ID'].nunique())
-                            
-                            with col3:
-                                avg_sentences = len(df_processed) / df_processed['ID'].nunique()
-                                st.metric("Avg Sentences/Post", f"{avg_sentences:.1f}")
-                            
-                            with col4:
-                                st.metric("Original Posts", len(df))
-                            
-                            # Display processed data
-                            st.subheader("📋 Processed Data")
-                            st.dataframe(df_processed, use_container_width=True)
-                            
-                            # Download section
-                            st.subheader("💾 Download Results")
-                            
-                            # Convert to CSV for download
-                            csv_buffer = io.StringIO()
-                            df_processed.to_csv(csv_buffer, index=False)
-                            csv_data = csv_buffer.getvalue()
-                            
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.download_button(
-                                    label="📥 Download as CSV",
-                                    data=csv_data,
-                                    file_name="instagram_posts_processed.csv",
-                                    mime="text/csv",
-                                    type="primary"
-                                )
-                            
-                            with col2:
-                                # Convert to Excel for download
-                                excel_buffer = io.BytesIO()
-                                df_processed.to_excel(excel_buffer, index=False, engine='openpyxl')
-                                excel_data = excel_buffer.getvalue()
-                                
-                                st.download_button(
-                                    label="📥 Download as Excel",
-                                    data=excel_data,
-                                    file_name="instagram_posts_processed.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                                )
-                            
-                            # Show sample of processed data
-                            with st.expander("👀 Sample of processed data"):
-                                st.write("First 10 processed sentences:")
-                                sample_df = df_processed.head(10)[['ID', 'Sentence ID', 'Statement']]
-                                st.dataframe(sample_df, use_container_width=True)
-                                
-                    except Exception as e:
-                        st.error(f"❌ Error processing data: {str(e)}")
-            
-            # Show column info
-            with st.expander("ℹ️ Column Information"):
-                st.write("**Selected Columns:**")
-                st.write(f"- **ID Column**: {id_column}")
-                st.write(f"- **Caption Column**: {caption_column}")
+            if st.button("🚀 Process Data", type="primary", disabled=(id_column == caption_column)):
+                if id_column == caption_column:
+                    st.error("Please select different columns for ID and Caption")
+                    return
                 
-                st.write("**Available Columns:**")
-                for i, col in enumerate(available_columns):
-                    st.write(f"{i+1}. {col}")
-                    
-        except Exception as e:
-            st.error(f"❌ Error loading file: {str(e)}")
-            st.info("Please make sure your file is a valid CSV format.")
+                with st.spinner("Processing posts..."):
+                    try:
+                        # Process the data
+                        processed_df = process_posts(
+                            df, 
+                            id_column, 
+                            caption_column, 
+                            min_sentence_length
+                        )
+                        
+                        if processed_df.empty:
+                            st.warning("⚠️ No sentences were extracted. Check your data and settings.")
+                            return
+                        
+                        # Store in session state
+                        st.session_state.processed_data = processed_df
+                        
+                        st.success(f"✅ Processing complete!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error during processing: {str(e)}")
+                        st.write("**Debug info:**")
+                        st.write(f"- Selected ID column: {id_column}")
+                        st.write(f"- Selected caption column: {caption_column}")
+                        st.write(f"- Data shape: {df.shape}")
     
-    else:
-        # Instructions when no file is uploaded
-        st.info("👆 Please upload a CSV file to get started")
+    # Display results if available
+    if st.session_state.processed_data is not None:
+        processed_df = st.session_state.processed_data
         
+        st.header("📊 Results")
+        
+        # Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Sentences", len(processed_df))
+        with col2:
+            st.metric("Unique Posts", processed_df['ID'].nunique())
+        with col3:
+            avg_sentences = len(processed_df) / processed_df['ID'].nunique() if processed_df['ID'].nunique() > 0 else 0
+            st.metric("Avg Sentences/Post", f"{avg_sentences:.1f}")
+        with col4:
+            avg_length = processed_df['Statement'].str.len().mean()
+            st.metric("Avg Sentence Length", f"{avg_length:.0f} chars")
+        
+        # Data display
+        st.subheader("📋 Processed Data")
+        st.dataframe(processed_df, use_container_width=True)
+        
+        # Download section
+        st.subheader("💾 Download")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # CSV download
+            csv_data = processed_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv_data,
+                file_name="processed_sentences.csv",
+                mime="text/csv"
+            )
+        
+        with col2:
+            # Excel download (with error handling)
+            try:
+                excel_buffer = io.BytesIO()
+                processed_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+                excel_data = excel_buffer.getvalue()
+                
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=excel_data,
+                    file_name="processed_sentences.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except ImportError:
+                st.info("Install openpyxl for Excel export: `pip install openpyxl`")
+    
+    # Instructions
+    if uploaded_file is None:
         st.markdown("""
-        ### 📋 Expected CSV Format
+        ## 📋 How to Use
         
-        Your CSV file should contain at least two columns:
-        - **ID Column**: Unique identifier for each post (e.g., 'shortcode', 'post_id')
-        - **Caption Column**: Text content of the post (e.g., 'caption', 'text', 'content')
+        1. **Upload** a CSV file with your Instagram posts data
+        2. **Select** the columns containing post IDs and captions
+        3. **Configure** processing options (minimum sentence length)
+        4. **Process** the data to extract individual sentences
+        5. **Download** the results as CSV or Excel
         
-        ### 🔄 What this app does:
+        ### 📊 Expected Format
+        Your CSV should have at least:
+        - **ID column**: Unique identifier for each post
+        - **Text column**: The caption or content to process
         
-        1. **Tokenizes** each Instagram caption into individual sentences
-        2. **Creates** a new row for each sentence with context
-        3. **Assigns** sentence IDs for tracking
-        4. **Preserves** the original caption as context
-        
-        ### 📊 Output Format:
-        
-        | ID | Sentence ID | Context | Statement |
-        |----|-----------:|---------|-----------|
-        | post123 | 1 | Full caption text... | First sentence. |
-        | post123 | 2 | Full caption text... | Second sentence. |
-        
-        ### 🛠️ Customization Options:
-        
-        - **Column Mapping**: Choose which columns contain your IDs and captions
-        - **Minimum Length**: Filter out very short sentences
-        - **Empty Captions**: Option to skip posts without text
+        ### 🔄 What it does
+        - Splits each caption into individual sentences
+        - Creates a new row for each sentence
+        - Preserves original context
+        - Assigns sentence numbers
         """)
 
 if __name__ == "__main__":
