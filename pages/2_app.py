@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-from collections import defaultdict
 import numpy as np
 
 def parse_keywords(keywords_input):
     """Parse keywords from various input formats"""
-    if not keywords_input.strip():
+    if not keywords_input or not keywords_input.strip():
         return []
+    
+    keywords_input = keywords_input.strip()
     
     if '"' in keywords_input:
         # Handle quoted keywords
@@ -25,9 +26,10 @@ def parse_keywords(keywords_input):
 
 def count_keyword_in_text(text, keyword, case_sensitive=False, exact_match=False):
     """Count occurrences of a keyword in text"""
-    if pd.isna(text):
+    if pd.isna(text) or text is None:
         text = ""
     
+    text = str(text)
     search_text = text if case_sensitive else text.lower()
     search_term = keyword if case_sensitive else keyword.lower()
     
@@ -43,130 +45,141 @@ def count_keyword_in_text(text, keyword, case_sensitive=False, exact_match=False
 
 def calculate_id_level_data(df, keywords, case_sensitive=False, exact_match=False):
     """Calculate ID-level aggregated statistics"""
-    # Group by ID
-    id_groups = df.groupby('ID')
-    
-    total_ids = len(id_groups)
-    total_words = 0
-    
-    id_stats = {}
-    
-    for id_val, group in id_groups:
-        combined_text = ' '.join(group['Statement'].astype(str))
-        word_count = len(re.findall(r'\b\w+\b', combined_text))
-        total_words += word_count
+    try:
+        # Group by ID
+        id_groups = df.groupby('ID')
         
-        # Find which keywords are present in this ID
-        present_keywords = []
-        for keyword in keywords:
-            search_text = combined_text if case_sensitive else combined_text.lower()
-            search_term = keyword if case_sensitive else keyword.lower()
+        total_ids = len(id_groups)
+        total_words = 0
+        
+        id_stats = {}
+        
+        for id_val, group in id_groups:
+            # Combine all statements for this ID
+            statements = group['Statement'].fillna('').astype(str)
+            combined_text = ' '.join(statements)
             
-            if exact_match:
-                words = re.findall(r'\b\w+\b', search_text)
-                if search_term in words:
-                    present_keywords.append(keyword)
-            else:
-                if search_term in search_text:
-                    present_keywords.append(keyword)
-        
-        id_stats[id_val] = {
-            'word_count': word_count,
-            'statement_count': len(group),
-            'present_keywords': present_keywords,
-            'combined_text': combined_text
-        }
-    
-    avg_words_per_id = total_words / total_ids if total_ids > 0 else 0
-    avg_statements_per_id = len(df) / total_ids if total_ids > 0 else 0
-    
-    # Calculate classifier breakdown
-    classifier_breakdown = []
-    for i, keyword in enumerate(keywords):
-        ids_with_keyword = [stats for stats in id_stats.values() 
-                          if keyword in stats['present_keywords']]
-        
-        total_words_in_keyword_ids = sum(stats['word_count'] for stats in ids_with_keyword)
-        percent_of_corpus = (total_words_in_keyword_ids / total_words * 100) if total_words > 0 else 0
-        
-        # Calculate average percentage within ID
-        if ids_with_keyword:
-            percentages = []
-            for stats in ids_with_keyword:
-                keyword_matches = count_keyword_in_text(stats['combined_text'], keyword, 
-                                                      case_sensitive, exact_match)
-                if stats['word_count'] > 0:
-                    percentages.append(keyword_matches / stats['word_count'] * 100)
+            # Count words
+            word_count = len(re.findall(r'\b\w+\b', combined_text))
+            total_words += word_count
+            
+            # Find which keywords are present in this ID
+            present_keywords = []
+            for keyword in keywords:
+                search_text = combined_text if case_sensitive else combined_text.lower()
+                search_term = keyword if case_sensitive else keyword.lower()
+                
+                if exact_match:
+                    words = re.findall(r'\b\w+\b', search_text)
+                    if search_term in words:
+                        present_keywords.append(keyword)
                 else:
-                    percentages.append(0)
-            avg_percent_within_id = np.mean(percentages)
-        else:
-            avg_percent_within_id = 0
+                    if search_term in search_text:
+                        present_keywords.append(keyword)
+            
+            id_stats[id_val] = {
+                'word_count': word_count,
+                'statement_count': len(group),
+                'present_keywords': present_keywords,
+                'combined_text': combined_text
+            }
         
-        classifier_breakdown.append({
-            'Index': i,
-            'Classifier': keyword,
-            'IDs with Classifier': len(ids_with_keyword),
-            'Total Words': total_words_in_keyword_ids,
-            '% of Total Corpus': f"{percent_of_corpus:.2f}%",
-            'Avg % within ID': f"{avg_percent_within_id:.2f}%"
-        })
-    
-    # Sort by number of IDs with classifier (descending)
-    classifier_breakdown.sort(key=lambda x: x['IDs with Classifier'], reverse=True)
-    
-    return {
-        'aggregate_stats': {
-            'total_ids': total_ids,
-            'total_words': total_words,
-            'avg_words_per_id': f"{avg_words_per_id:.2f}",
-            'avg_statements_per_id': f"{avg_statements_per_id:.2f}"
-        },
-        'classifier_breakdown': classifier_breakdown
-    }
+        avg_words_per_id = total_words / total_ids if total_ids > 0 else 0
+        avg_statements_per_id = len(df) / total_ids if total_ids > 0 else 0
+        
+        # Calculate classifier breakdown
+        classifier_breakdown = []
+        for i, keyword in enumerate(keywords):
+            ids_with_keyword = [stats for stats in id_stats.values() 
+                              if keyword in stats['present_keywords']]
+            
+            total_words_in_keyword_ids = sum(stats['word_count'] for stats in ids_with_keyword)
+            percent_of_corpus = (total_words_in_keyword_ids / total_words * 100) if total_words > 0 else 0
+            
+            # Calculate average percentage within ID
+            if ids_with_keyword:
+                percentages = []
+                for stats in ids_with_keyword:
+                    keyword_matches = count_keyword_in_text(stats['combined_text'], keyword, 
+                                                          case_sensitive, exact_match)
+                    if stats['word_count'] > 0:
+                        percentages.append(keyword_matches / stats['word_count'] * 100)
+                    else:
+                        percentages.append(0)
+                avg_percent_within_id = np.mean(percentages) if percentages else 0
+            else:
+                avg_percent_within_id = 0
+            
+            classifier_breakdown.append({
+                'Index': i,
+                'Classifier': keyword,
+                'IDs with Classifier': len(ids_with_keyword),
+                'Total Words': total_words_in_keyword_ids,
+                '% of Total Corpus': f"{percent_of_corpus:.2f}%",
+                'Avg % within ID': f"{avg_percent_within_id:.2f}%"
+            })
+        
+        # Sort by number of IDs with classifier (descending)
+        classifier_breakdown.sort(key=lambda x: x['IDs with Classifier'], reverse=True)
+        
+        return {
+            'aggregate_stats': {
+                'total_ids': total_ids,
+                'total_words': total_words,
+                'avg_words_per_id': f"{avg_words_per_id:.2f}",
+                'avg_statements_per_id': f"{avg_statements_per_id:.2f}"
+            },
+            'classifier_breakdown': classifier_breakdown
+        }
+    except Exception as e:
+        st.error(f"Error calculating ID-level data: {str(e)}")
+        return None
 
 def search_keywords_in_dataframe(df, keywords, case_sensitive=False, exact_match=False):
     """Search for keywords in the dataframe"""
-    results = {}
-    matching_rows = []
-    
-    for keyword in keywords:
-        matches = []
-        for idx, row in df.iterrows():
-            statement = str(row['Statement']) if pd.notna(row['Statement']) else ""
-            search_text = statement if case_sensitive else statement.lower()
-            search_term = keyword if case_sensitive else keyword.lower()
-            
-            found = False
-            if exact_match:
-                words = re.findall(r'\b\w+\b', search_text)
-                found = search_term in words
-            else:
-                found = search_term in search_text
-            
-            if found:
-                matches.append(idx)
+    try:
+        results = {}
+        matching_rows = []
         
-        results[keyword] = {
-            'found': len(matches) > 0,
-            'count': len(matches),
-            'matches': matches
-        }
+        for keyword in keywords:
+            matches = []
+            for idx, row in df.iterrows():
+                statement = str(row['Statement']) if pd.notna(row['Statement']) else ""
+                search_text = statement if case_sensitive else statement.lower()
+                search_term = keyword if case_sensitive else keyword.lower()
+                
+                found = False
+                if exact_match:
+                    words = re.findall(r'\b\w+\b', search_text)
+                    found = search_term in words
+                else:
+                    found = search_term in search_text
+                
+                if found:
+                    matches.append(idx)
+            
+            results[keyword] = {
+                'found': len(matches) > 0,
+                'count': len(matches),
+                'matches': matches
+            }
+            
+            # Add to matching rows
+            for match_idx in matches:
+                existing_row = next((r for r in matching_rows if r['index'] == match_idx), None)
+                if existing_row:
+                    existing_row['matched_keywords'].append(keyword)
+                else:
+                    matching_rows.append({
+                        'index': match_idx,
+                        'matched_keywords': [keyword]
+                    })
         
-        # Add to matching rows
-        for match_idx in matches:
-            existing_row = next((r for r in matching_rows if r['index'] == match_idx), None)
-            if existing_row:
-                existing_row['matched_keywords'].append(keyword)
-            else:
-                matching_rows.append({
-                    'index': match_idx,
-                    'matched_keywords': [keyword]
-                })
-    
-    return results, matching_rows
+        return results, matching_rows
+    except Exception as e:
+        st.error(f"Error searching keywords: {str(e)}")
+        return {}, []
 
-# Streamlit App
 def main():
     st.set_page_config(
         page_title="CSV Keyword Search Tool",
@@ -178,6 +191,12 @@ def main():
     st.title("🔍 CSV Keyword Search Tool")
     st.markdown("Upload a CSV file and search for keywords in the Statement column")
     st.markdown("**Brought to you by Ricky Woznichak**")
+    
+    # Initialize session state
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'keywords_input' not in st.session_state:
+        st.session_state.keywords_input = ""
     
     # Sidebar for configuration
     st.sidebar.header("⚙️ Configuration")
@@ -193,6 +212,7 @@ def main():
     
     if st.sidebar.button("Load Default Keywords"):
         st.session_state.keywords_input = default_keywords_text
+        st.rerun()
     
     # Search options
     st.sidebar.subheader("Search Options")
@@ -214,23 +234,43 @@ def main():
             try:
                 df = pd.read_csv(uploaded_file)
                 
-                # Validate required columns
-                if 'Statement' not in df.columns:
-                    st.error("❌ CSV file must contain a 'Statement' column")
-                    return
+                # Display basic info about the file
+                st.info(f"File uploaded: {uploaded_file.name}")
+                st.info(f"Shape: {df.shape[0]} rows, {df.shape[1]} columns")
+                st.info(f"Columns: {', '.join(df.columns.tolist())}")
                 
+                # Validate required columns
+                missing_cols = []
+                if 'Statement' not in df.columns:
+                    missing_cols.append('Statement')
                 if 'ID' not in df.columns:
-                    st.error("❌ CSV file must contain an 'ID' column for aggregation")
+                    missing_cols.append('ID')
+                
+                if missing_cols:
+                    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                    st.info("Available columns: " + ", ".join(df.columns.tolist()))
                     return
                 
                 # Remove rows with empty statements
+                original_len = len(df)
                 df = df.dropna(subset=['Statement'])
+                df = df[df['Statement'].astype(str).str.strip() != '']
                 
-                st.success(f"✅ File loaded: {len(df)} statements found")
-                st.info(f"Columns: {', '.join(df.columns.tolist())}")
+                if len(df) < original_len:
+                    st.warning(f"Removed {original_len - len(df)} rows with empty statements")
+                
+                if len(df) == 0:
+                    st.error("❌ No valid statements found in the file")
+                    return
+                
+                st.success(f"✅ File loaded successfully: {len(df)} valid statements found")
                 
                 # Store dataframe in session state
                 st.session_state.df = df
+                
+                # Show preview
+                with st.expander("Preview Data"):
+                    st.dataframe(df.head(), use_container_width=True)
                 
             except Exception as e:
                 st.error(f"❌ Error reading CSV file: {str(e)}")
@@ -239,30 +279,29 @@ def main():
     with col2:
         st.header("🔍 Enter Keywords")
         
-        # Initialize keywords input in session state if not exists
-        if 'keywords_input' not in st.session_state:
-            st.session_state.keywords_input = ""
-        
         keywords_input = st.text_area(
-            "Enter keywords in any of these formats:",
+            "Enter keywords:",
             value=st.session_state.keywords_input,
             height=150,
-            help="""
-            • Comma-separated: innovation, sustainability, growth
-            • With quotes: "innovation","sustainability","growth"
-            • One per line:
-              innovation
-              sustainability
-              growth
-            """,
-            key="keywords_input"
+            help="""Enter keywords in any of these formats:
+• Comma-separated: innovation, sustainability, growth
+• With quotes: "innovation","sustainability","growth"  
+• One per line:
+  innovation
+  sustainability
+  growth""",
+            key="keywords_text_area"
         )
+        
+        # Update session state when text area changes
+        if keywords_input != st.session_state.keywords_input:
+            st.session_state.keywords_input = keywords_input
         
         search_button = st.button("🔍 Search Keywords", type="primary")
     
     # Search functionality
     if search_button:
-        if 'df' not in st.session_state:
+        if st.session_state.df is None:
             st.error("❌ Please upload a CSV file first")
             return
         
@@ -277,19 +316,34 @@ def main():
             st.error("❌ No valid keywords found")
             return
         
+        st.info(f"Searching for {len(keywords)} keywords: {', '.join(keywords)}")
+        
         with st.spinner("Searching keywords..."):
-            # Perform search
-            keyword_results, matching_rows = search_keywords_in_dataframe(
-                df, keywords, case_sensitive, exact_match
-            )
-            
-            # Calculate statistics
-            total_statements = len(df)
-            statements_with_matches = len(set(row['index'] for row in matching_rows))
-            match_percentage = (statements_with_matches / total_statements * 100) if total_statements > 0 else 0
-            
-            # Calculate ID-level data
-            id_level_data = calculate_id_level_data(df, keywords, case_sensitive, exact_match)
+            try:
+                # Perform search
+                keyword_results, matching_rows = search_keywords_in_dataframe(
+                    df, keywords, case_sensitive, exact_match
+                )
+                
+                if not keyword_results:
+                    st.error("❌ Error occurred during search")
+                    return
+                
+                # Calculate statistics
+                total_statements = len(df)
+                statements_with_matches = len(set(row['index'] for row in matching_rows))
+                match_percentage = (statements_with_matches / total_statements * 100) if total_statements > 0 else 0
+                
+                # Calculate ID-level data
+                id_level_data = calculate_id_level_data(df, keywords, case_sensitive, exact_match)
+                
+                if id_level_data is None:
+                    st.error("❌ Error calculating ID-level data")
+                    return
+                
+            except Exception as e:
+                st.error(f"❌ Error during search: {str(e)}")
+                return
         
         # Display results
         st.header("📊 Search Results")
@@ -327,13 +381,16 @@ def main():
         st.subheader("📋 ID-Level Classifier Breakdown")
         
         st.info("""
-        **Column Definitions:**
-        - **% of Total Corpus:** What percentage of all words in your dataset come from IDs containing this keyword
-        - **Avg % within ID:** On average, what percentage of an individual ID's content is made up of this keyword
+**Column Definitions:**
+- **% of Total Corpus:** What percentage of all words in your dataset come from IDs containing this keyword
+- **Avg % within ID:** On average, what percentage of an individual ID's content is made up of this keyword
         """)
         
-        classifier_df = pd.DataFrame(id_level_data['classifier_breakdown'])
-        st.dataframe(classifier_df, use_container_width=True)
+        if id_level_data['classifier_breakdown']:
+            classifier_df = pd.DataFrame(id_level_data['classifier_breakdown'])
+            st.dataframe(classifier_df, use_container_width=True)
+        else:
+            st.info("No classifier data available")
         
         # Individual keyword results
         st.subheader("🔍 Individual Keyword Results")
@@ -361,64 +418,68 @@ def main():
         # Export results
         st.subheader("📥 Export Results")
         
-        # Create export data
-        export_data = []
-        
-        # Summary
-        export_data.append(["SEARCH RESULTS SUMMARY"])
-        export_data.append(["Keywords Found", found_keywords])
-        export_data.append(["Statements with Matches", statements_with_matches])
-        export_data.append(["Match Rate", f"{match_percentage:.1f}%"])
-        export_data.append(["Total Statements", total_statements])
-        export_data.append([""])
-        
-        # ID-Level data
-        export_data.append(["ID-LEVEL AGGREGATED DATA"])
-        export_data.append(["Total IDs", agg_stats['total_ids']])
-        export_data.append(["Total Words", agg_stats['total_words']])
-        export_data.append(["Avg Words/ID", agg_stats['avg_words_per_id']])
-        export_data.append(["Avg Statements/ID", agg_stats['avg_statements_per_id']])
-        export_data.append([""])
-        
-        # Classifier breakdown
-        export_data.append(["ID-LEVEL CLASSIFIER BREAKDOWN"])
-        export_data.append(["Index", "Classifier", "IDs with Classifier", "Total Words", "% of Total Corpus", "Avg % within ID"])
-        
-        for item in id_level_data['classifier_breakdown']:
-            export_data.append([
-                item['Index'],
-                item['Classifier'],
-                item['IDs with Classifier'],
-                item['Total Words'],
-                item['% of Total Corpus'],
-                item['Avg % within ID']
-            ])
-        
-        export_data.append([""])
-        
-        # Individual keyword results
-        export_data.append(["INDIVIDUAL KEYWORD RESULTS"])
-        export_data.append(["Keyword", "Found", "Statement Matches"])
-        
-        for keyword, data in keyword_results.items():
-            export_data.append([
-                keyword,
-                "Yes" if data['found'] else "No",
-                data['count']
-            ])
-        
-        # Convert to CSV string
-        export_df = pd.DataFrame(export_data)
-        csv_buffer = io.StringIO()
-        export_df.to_csv(csv_buffer, index=False, header=False)
-        csv_string = csv_buffer.getvalue()
-        
-        st.download_button(
-            label="💾 Download Results as CSV",
-            data=csv_string,
-            file_name="keyword_search_results.csv",
-            mime="text/csv"
-        )
+        try:
+            # Create export data
+            export_data = []
+            
+            # Summary
+            export_data.append(["SEARCH RESULTS SUMMARY"])
+            export_data.append(["Keywords Found", found_keywords])
+            export_data.append(["Statements with Matches", statements_with_matches])
+            export_data.append(["Match Rate", f"{match_percentage:.1f}%"])
+            export_data.append(["Total Statements", total_statements])
+            export_data.append([""])
+            
+            # ID-Level data
+            export_data.append(["ID-LEVEL AGGREGATED DATA"])
+            export_data.append(["Total IDs", agg_stats['total_ids']])
+            export_data.append(["Total Words", agg_stats['total_words']])
+            export_data.append(["Avg Words/ID", agg_stats['avg_words_per_id']])
+            export_data.append(["Avg Statements/ID", agg_stats['avg_statements_per_id']])
+            export_data.append([""])
+            
+            # Classifier breakdown
+            if id_level_data['classifier_breakdown']:
+                export_data.append(["ID-LEVEL CLASSIFIER BREAKDOWN"])
+                export_data.append(["Index", "Classifier", "IDs with Classifier", "Total Words", "% of Total Corpus", "Avg % within ID"])
+                
+                for item in id_level_data['classifier_breakdown']:
+                    export_data.append([
+                        item['Index'],
+                        item['Classifier'],
+                        item['IDs with Classifier'],
+                        item['Total Words'],
+                        item['% of Total Corpus'],
+                        item['Avg % within ID']
+                    ])
+                
+                export_data.append([""])
+            
+            # Individual keyword results
+            export_data.append(["INDIVIDUAL KEYWORD RESULTS"])
+            export_data.append(["Keyword", "Found", "Statement Matches"])
+            
+            for keyword, data in keyword_results.items():
+                export_data.append([
+                    keyword,
+                    "Yes" if data['found'] else "No",
+                    data['count']
+                ])
+            
+            # Convert to CSV string
+            export_df = pd.DataFrame(export_data)
+            csv_buffer = io.StringIO()
+            export_df.to_csv(csv_buffer, index=False, header=False)
+            csv_string = csv_buffer.getvalue()
+            
+            st.download_button(
+                label="💾 Download Results as CSV",
+                data=csv_string,
+                file_name="keyword_search_results.csv",
+                mime="text/csv"
+            )
+        except Exception as e:
+            st.error(f"Error creating export: {str(e)}")
 
 if __name__ == "__main__":
     main()
