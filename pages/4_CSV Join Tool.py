@@ -3,8 +3,12 @@ import pandas as pd
 import re
 import io
 from typing import Dict, List, Tuple, Optional
-import xlsxwriter
 from difflib import SequenceMatcher
+try:
+    import openpyxl
+    EXCEL_AVAILABLE = True
+except ImportError:
+    EXCEL_AVAILABLE = False
 
 # Configure page
 st.set_page_config(
@@ -168,28 +172,46 @@ def create_excel_download(df: pd.DataFrame, filename: str = "joined_data.xlsx") 
     """Create Excel file for download"""
     output = io.BytesIO()
     
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, sheet_name='Joined Data', index=False)
-        
-        # Get workbook and worksheet
-        workbook = writer.book
-        worksheet = writer.sheets['Joined Data']
-        
-        # Add formatting
-        header_format = workbook.add_format({
-            'bold': True,
-            'text_wrap': True,
-            'valign': 'top',
-            'fg_color': '#154734',  # Cal Poly Green
-            'font_color': 'white',
-            'border': 1
-        })
-        
-        # Apply header formatting
-        for col_num, value in enumerate(df.columns.values):
-            worksheet.write(0, col_num, value, header_format)
-            # Auto-adjust column width
-            worksheet.set_column(col_num, col_num, min(len(str(value)) + 5, 50))
+    if EXCEL_AVAILABLE:
+        try:
+            # Use pandas with openpyxl engine
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name='Joined Data', index=False)
+                
+                # Get workbook and worksheet for formatting
+                workbook = writer.book
+                worksheet = writer.sheets['Joined Data']
+                
+                # Apply basic formatting to header row
+                from openpyxl.styles import Font, PatternFill, Alignment
+                
+                header_font = Font(bold=True, color="FFFFFF")
+                header_fill = PatternFill(start_color="154734", end_color="154734", fill_type="solid")
+                header_alignment = Alignment(horizontal="center")
+                
+                # Format header row
+                for col_num, column_title in enumerate(df.columns, 1):
+                    cell = worksheet.cell(row=1, column=col_num)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = header_alignment
+                    
+                    # Auto-adjust column width
+                    column_letter = openpyxl.utils.get_column_letter(col_num)
+                    max_length = max(len(str(column_title)), 10)
+                    if len(df) > 0:
+                        max_length = max(max_length, 
+                                       df[column_title].astype(str).str.len().max() if df[column_title].astype(str).str.len().max() > 0 else 10)
+                    worksheet.column_dimensions[column_letter].width = min(max_length + 2, 50)
+                    
+        except Exception as e:
+            st.warning(f"Could not apply Excel formatting: {e}. Falling back to basic Excel export.")
+            # Fallback to basic Excel export
+            df.to_excel(output, sheet_name='Joined Data', index=False, engine='openpyxl')
+    else:
+        # If openpyxl is not available, return CSV as bytes
+        csv_string = df.to_csv(index=False)
+        return csv_string.encode('utf-8')
     
     output.seek(0)
     return output.getvalue()
@@ -444,13 +466,24 @@ def main():
         
         with col1:
             # Excel download
-            excel_data = create_excel_download(result_df)
-            st.download_button(
-                label="📊 Download as Excel",
-                data=excel_data,
-                file_name="joined_data.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            if EXCEL_AVAILABLE:
+                excel_data = create_excel_download(result_df)
+                st.download_button(
+                    label="📊 Download as Excel",
+                    data=excel_data,
+                    file_name="joined_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                # Fallback to CSV if Excel not available
+                csv_data = result_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download as CSV (Excel not available)",
+                    data=csv_data,
+                    file_name="joined_data.csv",
+                    mime="text/csv"
+                )
+                st.info("💡 Install openpyxl for Excel export: `pip install openpyxl`")
         
         with col2:
             # CSV download
