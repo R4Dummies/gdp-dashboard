@@ -10,7 +10,8 @@ try:
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
-    st.warning("⚠️ scikit-learn not found. Using built-in metric calculations.")
+    # Comment out the warning if you prefer no notifications
+    # st.warning("⚠️ scikit-learn not found. Using built-in metric calculations.")
 
 # Try to import plotly, fall back to matplotlib if not available
 try:
@@ -24,7 +25,8 @@ except ImportError:
         MATPLOTLIB_AVAILABLE = True
     except ImportError:
         MATPLOTLIB_AVAILABLE = False
-        st.warning("⚠️ Neither plotly nor matplotlib found. Charts will be disabled.")
+        # Comment out the warning if you prefer no notifications
+        # st.warning("⚠️ Neither plotly nor matplotlib found. Charts will be disabled.")
 
 # Page configuration
 st.set_page_config(
