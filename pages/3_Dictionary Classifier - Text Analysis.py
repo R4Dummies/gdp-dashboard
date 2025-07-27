@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import re
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, confusion_matrix
 import io
 import base64
 
@@ -315,15 +313,14 @@ with tab2:
         # Visualization
         st.subheader("📈 Distribution Chart")
         
-        # Create pie chart
-        fig = px.pie(
-            values=[no_matches, matches],
-            names=['No Match (0)', 'Match (1)'],
-            title="Classification Distribution",
-            color_discrete_sequence=['#dc2626', '#154734']
-        )
-        fig.update_layout(title_x=0.5)
-        st.plotly_chart(fig, use_container_width=True)
+        # Create data for chart
+        chart_data = pd.DataFrame({
+            'Classification': ['No Match (0)', 'Match (1)'],
+            'Count': [no_matches, matches]
+        })
+        
+        # Display bar chart
+        st.bar_chart(chart_data.set_index('Classification'))
         
         # Data table with filtering
         st.subheader("📋 Classified Data")
@@ -427,19 +424,26 @@ with tab3:
                 # Confusion matrix
                 st.subheader("📊 Confusion Matrix")
                 
-                from sklearn.metrics import confusion_matrix
                 cm = confusion_matrix(y_true, y_pred)
                 
-                fig = px.imshow(
+                # Create a simple confusion matrix display
+                cm_df = pd.DataFrame(
                     cm,
-                    labels=dict(x="Predicted", y="Actual", color="Count"),
-                    x=['No Match (0)', 'Match (1)'],
-                    y=['No Match (0)', 'Match (1)'],
-                    color_continuous_scale='Greens',
-                    text_auto=True
+                    columns=['Predicted: No Match', 'Predicted: Match'],
+                    index=['Actual: No Match', 'Actual: Match']
                 )
-                fig.update_layout(title="Confusion Matrix", title_x=0.5)
-                st.plotly_chart(fig, use_container_width=True)
+                
+                st.write("**Confusion Matrix:**")
+                st.dataframe(cm_df, use_container_width=True)
+                
+                # Display confusion matrix values in a more readable format
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("True Negatives", cm[0,0])
+                    st.metric("False Positives", cm[0,1])
+                with col2:
+                    st.metric("False Negatives", cm[1,0])
+                    st.metric("True Positives", cm[1,1])
                 
                 # Performance breakdown
                 st.subheader("📋 Detailed Analysis")
