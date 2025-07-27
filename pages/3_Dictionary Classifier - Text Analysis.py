@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import re
 import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, confusion_matrix
 import io
 import base64
 
@@ -101,18 +100,42 @@ def classify_text(text, keywords, case_sensitive=False, exact_match=False):
     return 0
 
 def calculate_metrics(y_true, y_pred):
-    """Calculate classification metrics"""
-    precision = precision_score(y_true, y_pred, zero_division=0)
-    recall = recall_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    accuracy = accuracy_score(y_true, y_pred)
+    """Calculate classification metrics manually"""
+    # Convert to numpy arrays for easier processing
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Calculate confusion matrix components
+    tp = np.sum((y_true == 1) & (y_pred == 1))  # True Positives
+    tn = np.sum((y_true == 0) & (y_pred == 0))  # True Negatives
+    fp = np.sum((y_true == 0) & (y_pred == 1))  # False Positives
+    fn = np.sum((y_true == 1) & (y_pred == 0))  # False Negatives
+    
+    # Calculate metrics
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    accuracy = (tp + tn) / len(y_true) if len(y_true) > 0 else 0
     
     return {
         'precision': precision,
         'recall': recall,
         'f1': f1,
-        'accuracy': accuracy
+        'accuracy': accuracy,
+        'confusion_matrix': np.array([[tn, fp], [fn, tp]])
     }
+
+def create_confusion_matrix(y_true, y_pred):
+    """Create confusion matrix manually"""
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    tp = np.sum((y_true == 1) & (y_pred == 1))
+    tn = np.sum((y_true == 0) & (y_pred == 0))
+    fp = np.sum((y_true == 0) & (y_pred == 1))
+    fn = np.sum((y_true == 1) & (y_pred == 0))
+    
+    return np.array([[tn, fp], [fn, tp]])
 
 def create_download_link(df, filename="classified_data.csv"):
     """Create a download link for dataframe"""
@@ -424,7 +447,7 @@ with tab3:
                 # Confusion matrix
                 st.subheader("📊 Confusion Matrix")
                 
-                cm = confusion_matrix(y_true, y_pred)
+                cm = create_confusion_matrix(y_true, y_pred)
                 
                 # Create a simple confusion matrix display
                 cm_df = pd.DataFrame(
@@ -439,11 +462,11 @@ with tab3:
                 # Display confusion matrix values in a more readable format
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("True Negatives", cm[0,0])
-                    st.metric("False Positives", cm[0,1])
+                    st.metric("True Negatives", int(cm[0,0]))
+                    st.metric("False Positives", int(cm[0,1]))
                 with col2:
-                    st.metric("False Negatives", cm[1,0])
-                    st.metric("True Positives", cm[1,1])
+                    st.metric("False Negatives", int(cm[1,0]))
+                    st.metric("True Positives", int(cm[1,1]))
                 
                 # Performance breakdown
                 st.subheader("📋 Detailed Analysis")
