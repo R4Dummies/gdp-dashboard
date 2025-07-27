@@ -1,524 +1,421 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from io import StringIO
 import re
-from datetime import datetime
-import base64
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+import plotly.express as px
+import plotly.graph_objects as go
+from io import StringIO
 
-# Set page configuration
+# Page configuration
 st.set_page_config(
-    page_title="Dictionary Classification Bot",
-    page_icon="🔍",
+    page_title="Dictionary Classifier",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for styling
 st.markdown("""
 <style>
     .main-header {
-        text-align: center;
-        color: #166534;
+        background: linear-gradient(90deg, #154734 0%, #1e5d47 100%);
+        padding: 2rem;
+        border-radius: 10px;
         margin-bottom: 2rem;
-    }
-    .step-container {
-        border-left: 4px solid #16a34a;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        background-color: #f9fafb;
-        border-radius: 0.5rem;
+        color: white;
+        text-align: center;
     }
     .metric-card {
-        background-color: #f0fdf4;
-        border: 2px solid #bbf7d0;
-        border-radius: 0.5rem;
+        background: white;
         padding: 1rem;
-        text-align: center;
+        border-radius: 8px;
+        border-left: 4px solid #154734;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .keyword-tag {
-        background-color: #eab308;
+        background-color: #154734;
         color: white;
         padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 500;
+        border-radius: 15px;
         margin: 0.25rem;
         display: inline-block;
+        font-size: 0.875rem;
     }
-    .success-msg {
-        background-color: #dcfce7;
-        border: 1px solid #bbf7d0;
-        color: #166534;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+    .stButton > button {
+        background-color: #154734;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
     }
-    .error-msg {
-        background-color: #fef2f2;
-        border: 1px solid #fecaca;
-        color: #dc2626;
-        padding: 0.75rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
+    .stButton > button:hover {
+        background-color: #1e5d47;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Initialize session state
+if 'keywords' not in st.session_state:
+    st.session_state.keywords = [
+        'classic', 'timeless', 'refined', 'elegant', 'tailored', 'heritage', 
+        'bespoke', 'polished', 'sophisticated', 'custom', 'understated', 
+        'luxurious', 'impeccable', 'premium', 'crafted', 'high-end', 
+        'clean lines', 'sharp', 'iconic', 'wardrobe staple', 'minimal', 
+        'structured', 'graceful', 'prestigious', 'exquisite', 'exclusive', 
+        'luxury', 'traditional', 'enduring', 'sleek'
+    ]
+
 if 'csv_data' not in st.session_state:
     st.session_state.csv_data = None
-if 'dictionary' not in st.session_state:
-    st.session_state.dictionary = []
-if 'classification_results' not in st.session_state:
-    st.session_state.classification_results = None
-if 'keyword_analysis' not in st.session_state:
-    st.session_state.keyword_analysis = None
+if 'ground_truth_data' not in st.session_state:
+    st.session_state.ground_truth_data = None
+if 'classified_data' not in st.session_state:
+    st.session_state.classified_data = None
 
-def parse_csv_data(csv_text):
-    """Parse CSV text and return DataFrame"""
-    try:
-        df = pd.read_csv(StringIO(csv_text))
-        return df, None
-    except Exception as e:
-        return None, f"Error parsing CSV: {str(e)}"
+# Helper functions
+def classify_text(text, keywords, case_sensitive=False, exact_match=False):
+    """Classify text based on keyword matching"""
+    if pd.isna(text) or not keywords:
+        return 0
+    
+    text_to_search = text if case_sensitive else text.lower()
+    keywords_to_search = keywords if case_sensitive else [k.lower() for k in keywords]
+    
+    for keyword in keywords_to_search:
+        if exact_match:
+            # Word boundary matching for exact words
+            pattern = r'\b' + re.escape(keyword) + r'\b'
+            if re.search(pattern, text_to_search, re.IGNORECASE if not case_sensitive else 0):
+                return 1
+        else:
+            # Partial matching
+            if keyword in text_to_search:
+                return 1
+    
+    return 0
 
-def parse_dictionary(dict_text):
-    """Parse dictionary text and return list of keywords"""
-    if not dict_text.strip():
-        return []
-    
-    # Try parsing quoted format first
-    quoted_pattern = r'"([^"]+)"'
-    keywords = re.findall(quoted_pattern, dict_text)
-    
-    if not keywords:
-        # Try comma-separated format
-        keywords = [k.strip() for k in dict_text.split(',') if k.strip()]
-    
-    return keywords
-
-def classify_statements(df, text_column, ground_truth_column, dictionary):
-    """Classify statements using dictionary"""
-    results = []
-    
-    for idx, row in df.iterrows():
-        statement = str(row[text_column]).lower() if pd.notna(row[text_column]) else ""
-        
-        # Find matched keywords
-        matched_keywords = [kw for kw in dictionary if kw.lower() in statement]
-        predicted = 1 if matched_keywords else 0
-        
-        # Get ground truth if available
-        ground_truth = None
-        category = None
-        if ground_truth_column and ground_truth_column in df.columns:
-            try:
-                ground_truth = int(row[ground_truth_column])
-                # Determine classification category
-                if predicted == 1 and ground_truth == 1:
-                    category = 'TP'
-                elif predicted == 1 and ground_truth == 0:
-                    category = 'FP'
-                elif predicted == 0 and ground_truth == 1:
-                    category = 'FN'
-                else:
-                    category = 'TN'
-            except (ValueError, TypeError):
-                ground_truth = None
-        
-        result = {
-            'index': idx,
-            'predicted': predicted,
-            'ground_truth': ground_truth,
-            'category': category,
-            'matched_keywords': matched_keywords,
-            'score': len(matched_keywords)
-        }
-        
-        # Add original data
-        for col in df.columns:
-            result[col] = row[col]
-        
-        results.append(result)
-    
-    return pd.DataFrame(results)
-
-def calculate_metrics(results_df):
-    """Calculate classification metrics"""
-    if 'category' not in results_df.columns or results_df['category'].isna().all():
-        return None
-    
-    tp = len(results_df[results_df['category'] == 'TP'])
-    fp = len(results_df[results_df['category'] == 'FP'])
-    fn = len(results_df[results_df['category'] == 'FN'])
-    tn = len(results_df[results_df['category'] == 'TN'])
-    
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
-    
-    return {
-        'precision': precision * 100,
-        'recall': recall * 100,
-        'f1_score': f1 * 100,
-        'accuracy': accuracy * 100,
-        'true_positives': tp,
-        'false_positives': fp,
-        'false_negatives': fn,
-        'true_negatives': tn
-    }
-
-def analyze_keywords(df, text_column, ground_truth_column, dictionary):
-    """Analyze individual keyword performance"""
-    keyword_metrics = []
-    
-    for keyword in dictionary:
-        tp_examples = []
-        fp_examples = []
-        total_positives = 0
-        
-        for idx, row in df.iterrows():
-            statement = str(row[text_column]).lower() if pd.notna(row[text_column]) else ""
-            contains_keyword = keyword.lower() in statement
-            
-            try:
-                ground_truth = int(row[ground_truth_column])
-                if ground_truth == 1:
-                    total_positives += 1
-                    if contains_keyword:
-                        tp_examples.append(row[text_column])
-                elif ground_truth == 0 and contains_keyword:
-                    fp_examples.append(row[text_column])
-            except (ValueError, TypeError):
-                continue
-        
-        recall = len(tp_examples) / total_positives if total_positives > 0 else 0
-        precision = len(tp_examples) / (len(tp_examples) + len(fp_examples)) if (len(tp_examples) + len(fp_examples)) > 0 else 0
-        f1 = 2 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0
-        
-        keyword_metrics.append({
-            'keyword': keyword,
-            'true_positives_count': len(tp_examples),
-            'false_positives_count': len(fp_examples),
-            'recall': recall * 100,
-            'precision': precision * 100,
-            'f1_score': f1 * 100,
-            'tp_examples': tp_examples[:3],
-            'fp_examples': fp_examples[:3]
-        })
-    
-    return keyword_metrics
-
-def create_download_link(df, filename, link_text):
-    """Create a download link for DataFrame"""
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">{link_text}</a>'
-    return href
-
-# Main app
-def main():
-    st.markdown('<h1 class="main-header">🔍 Dictionary Classification Bot</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align: center; color: #16a34a;">Enter keywords and classify statements to analyze their effectiveness</p>', unsafe_allow_html=True)
-    
-    # Sidebar for configuration
-    with st.sidebar:
-        st.header("Configuration")
-        
-        # Sample data option
-        if st.button("Load Sample Data", type="secondary"):
-            sample_csv = """ID,Statement,Answer
-1,It's SPRING TRUNK SHOW week!,1
-2,I am offering 4 shirts styled the way you want & the 5th is Also tossing in MAGNETIC COLLAR STAY to help keep your collars in place!,1
-3,In recognition of Earth Day I would like to showcase our collection of Earth Fibers!,0
-4,It is now time to do some wardrobe crunches and check your basics! Never on sale.,1
-5,He's a hard worker and always willing to lend a hand. The prices are the best I've seen in 17 years of servicing my clients.,0"""
-            st.session_state.csv_data, _ = parse_csv_data(sample_csv)
-            st.success("Sample data loaded!")
-    
-    # Step 1: Input CSV Data
-    st.markdown('<div class="step-container">', unsafe_allow_html=True)
-    st.header("📊 Step 1: Input Sample Data (CSV Format)")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        # File upload
-        uploaded_file = st.file_uploader("Upload CSV File", type="csv")
-        if uploaded_file is not None:
-            csv_text = StringIO(uploaded_file.getvalue().decode("utf-8")).read()
-            df, error = parse_csv_data(csv_text)
-            if error:
-                st.markdown(f'<div class="error-msg">❌ {error}</div>', unsafe_allow_html=True)
-            else:
-                st.session_state.csv_data = df
-                st.markdown(f'<div class="success-msg">✅ Loaded {len(df)} rows</div>', unsafe_allow_html=True)
-    
-    with col2:
-        # Manual input
-        csv_input = st.text_area(
-            "Or paste your CSV data here:",
-            height=150,
-            placeholder="ID,Statement,Answer\n1,Sample statement,1\n2,Another statement,0"
-        )
-        
-        if csv_input.strip():
-            df, error = parse_csv_data(csv_input)
-            if error:
-                st.markdown(f'<div class="error-msg">❌ {error}</div>', unsafe_allow_html=True)
-            else:
-                st.session_state.csv_data = df
-                st.markdown(f'<div class="success-msg">✅ Loaded {len(df)} rows</div>', unsafe_allow_html=True)
-    
-    # Column selection
-    if st.session_state.csv_data is not None:
-        st.subheader("Column Selection")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            text_column = st.selectbox(
-                "Text Column for Analysis",
-                options=st.session_state.csv_data.columns.tolist(),
-                index=0 if 'Statement' not in st.session_state.csv_data.columns else st.session_state.csv_data.columns.tolist().index('Statement')
-            )
-        
-        with col2:
-            ground_truth_column = st.selectbox(
-                "Ground Truth Column (0/1 values) - Optional",
-                options=['None'] + st.session_state.csv_data.columns.tolist(),
-                index=0 if 'Answer' not in st.session_state.csv_data.columns else st.session_state.csv_data.columns.tolist().index('Answer') + 1
-            )
-            if ground_truth_column == 'None':
-                ground_truth_column = None
-        
-        # Show data preview
-        st.subheader("Data Preview")
-        st.dataframe(st.session_state.csv_data.head(), use_container_width=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Step 2: Enter Dictionary
-    st.markdown('<div class="step-container">', unsafe_allow_html=True)
-    st.header("📝 Step 2: Enter Keyword Dictionary")
-    
-    # Default dictionary
-    default_dict = '"spring","trunk show","customized","customization","earth day","wardrobe","sale","prices"'
-    
-    dict_input = st.text_area(
-        "Enter keywords (format: \"word1\",\"word2\",\"word3\" or word1, word2, word3):",
-        value=default_dict,
-        height=100,
-        help="You can use quoted format or simple comma-separated format"
+def calculate_metrics(classified_data, ground_truth_data):
+    """Calculate performance metrics"""
+    # Merge data on ID
+    merged_data = classified_data.merge(
+        ground_truth_data, 
+        on='ID', 
+        how='inner'
     )
     
-    if st.button("Save Dictionary", type="primary"):
-        keywords = parse_dictionary(dict_input)
-        if keywords:
-            st.session_state.dictionary = keywords
-            st.markdown(f'<div class="success-msg">✅ Dictionary saved with {len(keywords)} keywords</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="error-msg">❌ Please enter valid keywords</div>', unsafe_allow_html=True)
+    if merged_data.empty:
+        return None
     
-    # Display current dictionary
-    if st.session_state.dictionary:
-        st.subheader(f"Current Dictionary ({len(st.session_state.dictionary)} keywords)")
-        keywords_html = ''.join([f'<span class="keyword-tag">{kw}</span>' for kw in st.session_state.dictionary])
-        st.markdown(keywords_html, unsafe_allow_html=True)
+    y_true = merged_data['Mode_Researcher'].astype(int)
+    y_pred = merged_data['tactic_present'].astype(int)
     
-    st.markdown('</div>', unsafe_allow_html=True)
+    metrics = {
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall': recall_score(y_true, y_pred, zero_division=0),
+        'f1': f1_score(y_true, y_pred, zero_division=0),
+        'accuracy': accuracy_score(y_true, y_pred),
+        'total_samples': len(merged_data)
+    }
     
-    # Step 3: Classify Statements
-    if st.session_state.csv_data is not None and st.session_state.dictionary and 'text_column' in locals():
-        st.markdown('<div class="step-container">', unsafe_allow_html=True)
-        st.header("🎯 Step 3: Classify Statements")
-        
-        if st.button("Classify Statements", type="primary"):
-            with st.spinner("Classifying statements..."):
-                results_df = classify_statements(
-                    st.session_state.csv_data, 
-                    text_column, 
-                    ground_truth_column, 
-                    st.session_state.dictionary
-                )
-                st.session_state.classification_results = results_df
-                st.success("Classification completed!")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    return metrics
+
+# Header
+st.markdown("""
+<div class="main-header">
+    <h1>📊 Dictionary Classifier</h1>
+    <p>Cal Poly Pomona • Text Analysis Tool</p>
+    <p>Classify text data using advanced keyword matching algorithms</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Sidebar for settings
+st.sidebar.header("⚙️ Configuration")
+
+# File uploads
+st.sidebar.subheader("📁 File Upload")
+
+# Main CSV upload
+uploaded_file = st.sidebar.file_uploader(
+    "Upload Data File (CSV)",
+    type=['csv'],
+    help="Expected columns: ID, Statement"
+)
+
+# Ground truth upload
+ground_truth_file = st.sidebar.file_uploader(
+    "Upload Ground Truth (Optional)",
+    type=['csv'],
+    help="Expected columns: ID, Mode_Researcher"
+)
+
+# Processing settings
+st.sidebar.subheader("🔧 Processing Settings")
+case_sensitive = st.sidebar.checkbox("Case Sensitive", value=False)
+exact_match = st.sidebar.checkbox("Exact Word Match", value=False)
+
+# Process uploaded files
+if uploaded_file is not None:
+    try:
+        st.session_state.csv_data = pd.read_csv(uploaded_file)
+        st.sidebar.success(f"✅ Loaded {len(st.session_state.csv_data)} rows")
+    except Exception as e:
+        st.sidebar.error(f"Error loading file: {str(e)}")
+
+if ground_truth_file is not None:
+    try:
+        st.session_state.ground_truth_data = pd.read_csv(ground_truth_file)
+        st.sidebar.success(f"✅ Loaded {len(st.session_state.ground_truth_data)} ground truth rows")
+    except Exception as e:
+        st.sidebar.error(f"Error loading ground truth file: {str(e)}")
+
+# Main content area
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.header("🔤 Keywords Management")
     
-    # Classification Results
-    if st.session_state.classification_results is not None:
-        st.markdown('<div class="step-container">', unsafe_allow_html=True)
-        st.header("📈 Classification Results Summary")
-        
-        results_df = st.session_state.classification_results
-        metrics = calculate_metrics(results_df)
-        
-        if metrics:
-            # Display metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>Accuracy</h3>
-                    <h2>{metrics['accuracy']:.2f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>Precision</h3>
-                    <h2>{metrics['precision']:.2f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>Recall</h3>
-                    <h2>{metrics['recall']:.2f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown(f"""
-                <div class="metric-card">
-                    <h3>F1 Score</h3>
-                    <h2>{metrics['f1_score']:.2f}%</h2>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Confusion Matrix Summary
-            st.subheader("Confusion Matrix Summary")
-            st.write(f"**True Positives:** {metrics['true_positives']} | "
-                    f"**False Positives:** {metrics['false_positives']} | "
-                    f"**False Negatives:** {metrics['false_negatives']} | "
-                    f"**True Negatives:** {metrics['true_negatives']}")
-            
-            # Export buttons
-            st.subheader("Export Results")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("📥 Export Full Results"):
-                    st.download_button(
-                        label="Download Classification Results CSV",
-                        data=results_df.to_csv(index=False),
-                        file_name=f"classification_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-            
-            with col2:
-                metrics_df = pd.DataFrame([metrics])
-                if st.button("📥 Export Metrics"):
-                    st.download_button(
-                        label="Download Metrics CSV",
-                        data=metrics_df.to_csv(index=False),
-                        file_name=f"metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-            
-            # False Positives and Negatives
-            false_positives = results_df[results_df['category'] == 'FP']
-            false_negatives = results_df[results_df['category'] == 'FN']
-            
-            if len(false_positives) > 0:
-                st.subheader("🔴 False Positives (Incorrectly Classified as Positive)")
-                with st.expander(f"View {len(false_positives)} false positives"):
-                    for idx, row in false_positives.head(10).iterrows():
-                        st.write(f"**Statement:** {row[text_column]}")
-                        st.write(f"**Matched keywords:** {', '.join(row['matched_keywords'])}")
-                        st.write("---")
-            
-            if len(false_negatives) > 0:
-                st.subheader("🟡 False Negatives (Missed Positive Cases)")
-                with st.expander(f"View {len(false_negatives)} false negatives"):
-                    for idx, row in false_negatives.head(10).iterrows():
-                        st.write(f"**Statement:** {row[text_column]}")
-                        st.write("**No keywords matched**")
-                        st.write("---")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    # Display current keywords
+    st.subheader("Current Keywords")
     
-    # Step 4: Keyword Analysis
-    if (st.session_state.classification_results is not None and 
-        'ground_truth_column' in locals() and ground_truth_column):
+    # Create a container for keywords with tags
+    keywords_container = st.container()
+    with keywords_container:
+        keyword_html = ""
+        for i, keyword in enumerate(st.session_state.keywords):
+            keyword_html += f'<span class="keyword-tag">{keyword}</span>'
+        st.markdown(keyword_html, unsafe_allow_html=True)
+        st.write(f"**Total Keywords:** {len(st.session_state.keywords)}")
+    
+    # Add new keywords
+    col_add, col_remove = st.columns([2, 1])
+    
+    with col_add:
+        new_keywords = st.text_input(
+            "Add Keywords (comma-separated)",
+            placeholder="Enter keywords separated by commas..."
+        )
         
-        st.markdown('<div class="step-container">', unsafe_allow_html=True)
-        st.header("🔍 Step 4: Keyword Impact Analysis")
-        st.write("Analyze keywords by different metrics to find the optimal set for your classification needs")
-        
-        if st.button("Analyze Keyword Impact", type="primary"):
-            with st.spinner("Analyzing keywords..."):
-                keyword_metrics = analyze_keywords(
-                    st.session_state.csv_data,
-                    text_column,
-                    ground_truth_column,
-                    st.session_state.dictionary
-                )
-                st.session_state.keyword_analysis = keyword_metrics
-                st.success("Keyword analysis completed!")
-        
-        if st.session_state.keyword_analysis:
-            metrics_data = st.session_state.keyword_analysis
-            
-            # Metric selection
-            metric_option = st.selectbox(
-                "Sort keywords by:",
-                options=["Recall", "Precision", "F1 Score"],
-                index=0
+        if st.button("➕ Add Keywords"):
+            if new_keywords.strip():
+                # Split by comma and clean up
+                keywords_to_add = [
+                    k.strip().lower() 
+                    for k in new_keywords.split(',') 
+                    if k.strip() and k.strip().lower() not in st.session_state.keywords
+                ]
+                
+                if keywords_to_add:
+                    st.session_state.keywords.extend(keywords_to_add)
+                    st.success(f"Added {len(keywords_to_add)} new keywords!")
+                    st.rerun()
+                else:
+                    st.warning("No new keywords to add (duplicates ignored)")
+    
+    with col_remove:
+        if st.session_state.keywords:
+            keyword_to_remove = st.selectbox(
+                "Remove Keyword",
+                options=["Select..."] + st.session_state.keywords
             )
             
-            # Sort data based on selected metric
-            if metric_option == "Recall":
-                sorted_data = sorted(metrics_data, key=lambda x: x['recall'], reverse=True)
-                metric_description = "**Recall:** Percentage of true positive cases captured. High recall means the keyword catches most relevant statements."
-            elif metric_option == "Precision":
-                sorted_data = sorted(metrics_data, key=lambda x: x['precision'], reverse=True)
-                metric_description = "**Precision:** Percentage of predictions that are correct. High precision means the keyword rarely triggers on irrelevant statements."
-            else:
-                sorted_data = sorted(metrics_data, key=lambda x: x['f1_score'], reverse=True)
-                metric_description = "**F1 Score:** Harmonic mean of precision and recall. Balances both metrics for overall effectiveness."
-            
-            st.markdown(f'<div class="success-msg">{metric_description}</div>', unsafe_allow_html=True)
-            
-            # Display top 10 keywords
-            st.subheader(f"Top 10 Keywords by {metric_option}")
-            
-            for i, analysis in enumerate(sorted_data[:10]):
-                with st.expander(f"#{i+1} - {analysis['keyword']} (Recall: {analysis['recall']:.1f}%, Precision: {analysis['precision']:.1f}%, F1: {analysis['f1_score']:.1f}%)"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**True Positives ({analysis['true_positives_count']}):**")
-                        if analysis['tp_examples']:
-                            for example in analysis['tp_examples']:
-                                st.write(f"• {example}")
-                        else:
-                            st.write("No examples")
-                    
-                    with col2:
-                        st.write(f"**False Positives ({analysis['false_positives_count']}):**")
-                        if analysis['fp_examples']:
-                            for example in analysis['fp_examples']:
-                                st.write(f"• {example}")
-                        else:
-                            st.write("No examples")
-            
-            # Export keyword analysis
-            if st.button("📥 Export Keyword Analysis"):
-                analysis_df = pd.DataFrame(sorted_data)
-                st.download_button(
-                    label="Download Keyword Analysis CSV",
-                    data=analysis_df.to_csv(index=False),
-                    file_name=f"keyword_analysis_{metric_option.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+            if st.button("🗑️ Remove") and keyword_to_remove != "Select...":
+                st.session_state.keywords.remove(keyword_to_remove)
+                st.success(f"Removed '{keyword_to_remove}'")
+                st.rerun()
+    
+    # Reset to default
+    if st.button("🔄 Reset to Default Keywords"):
+        st.session_state.keywords = [
+            'classic', 'timeless', 'refined', 'elegant', 'tailored', 'heritage', 
+            'bespoke', 'polished', 'sophisticated', 'custom', 'understated', 
+            'luxurious', 'impeccable', 'premium', 'crafted', 'high-end', 
+            'clean lines', 'sharp', 'iconic', 'wardrobe staple', 'minimal', 
+            'structured', 'graceful', 'prestigious', 'exquisite', 'exclusive', 
+            'luxury', 'traditional', 'enduring', 'sleek'
+        ]
+        st.success("Keywords reset to default!")
+        st.rerun()
 
-if __name__ == "__main__":
-    main()
+with col2:
+    st.header("📊 Quick Stats")
+    
+    if st.session_state.csv_data is not None:
+        data = st.session_state.csv_data
+        st.metric("Total Rows", len(data))
+        
+        if 'Statement' in data.columns:
+            non_empty_statements = data['Statement'].notna().sum()
+            st.metric("Non-empty Statements", non_empty_statements)
+        
+        if 'ID' in data.columns:
+            unique_ids = data['ID'].nunique()
+            st.metric("Unique IDs", unique_ids)
+    else:
+        st.info("Upload a CSV file to see statistics")
+
+# Processing and Results
+if st.session_state.csv_data is not None and len(st.session_state.keywords) > 0:
+    st.header("🔄 Processing Results")
+    
+    # Process classification
+    if st.button("🚀 Run Classification", type="primary"):
+        with st.spinner("Processing classification..."):
+            data = st.session_state.csv_data.copy()
+            
+            # Apply classification
+            data['tactic_present'] = data['Statement'].apply(
+                lambda x: classify_text(
+                    x, 
+                    st.session_state.keywords, 
+                    case_sensitive, 
+                    exact_match
+                )
+            )
+            
+            st.session_state.classified_data = data
+            st.success("Classification completed!")
+    
+    # Display results if classification has been run
+    if st.session_state.classified_data is not None:
+        classified_data = st.session_state.classified_data
+        
+        # Summary statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        total_rows = len(classified_data)
+        matches = (classified_data['tactic_present'] == 1).sum()
+        no_matches = total_rows - matches
+        match_percentage = (matches / total_rows * 100) if total_rows > 0 else 0
+        
+        with col1:
+            st.metric("Total Rows", total_rows)
+        with col2:
+            st.metric("Matches", matches)
+        with col3:
+            st.metric("No Matches", no_matches)
+        with col4:
+            st.metric("Match %", f"{match_percentage:.1f}%")
+        
+        # Visualization
+        st.subheader("📈 Distribution Chart")
+        
+        # Create pie chart
+        fig = px.pie(
+            values=[no_matches, matches],
+            names=['No Match (0)', 'Match (1)'],
+            color_discrete_sequence=['#dc2626', '#154734'],
+            title="Classification Distribution"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Performance metrics (if ground truth is available)
+        if st.session_state.ground_truth_data is not None:
+            st.subheader("📊 Performance Metrics")
+            
+            metrics = calculate_metrics(classified_data, st.session_state.ground_truth_data)
+            
+            if metrics:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Precision", f"{metrics['precision']:.3f}")
+                with col2:
+                    st.metric("Recall", f"{metrics['recall']:.3f}")
+                with col3:
+                    st.metric("F1 Score", f"{metrics['f1']:.3f}")
+                with col4:
+                    st.metric("Accuracy", f"{metrics['accuracy']:.3f}")
+                
+                st.info(f"Metrics calculated on {metrics['total_samples']} matched samples")
+            else:
+                st.warning("Unable to calculate metrics. Check that ID columns match between datasets.")
+        
+        # Data preview
+        st.subheader("👀 Data Preview")
+        
+        # Show first 10 rows
+        preview_data = classified_data.head(10)
+        
+        # Style the dataframe
+        def highlight_matches(val):
+            if val == 1:
+                return 'background-color: #154734; color: white'
+            else:
+                return 'background-color: #dc2626; color: white'
+        
+        styled_df = preview_data.style.applymap(
+            highlight_matches, 
+            subset=['tactic_present']
+        )
+        
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Download button
+        st.subheader("💾 Download Results")
+        
+        csv_buffer = StringIO()
+        classified_data.to_csv(csv_buffer, index=False)
+        csv_string = csv_buffer.getvalue()
+        
+        st.download_button(
+            label="📥 Download Classified Data (CSV)",
+            data=csv_string,
+            file_name="classified_data.csv",
+            mime="text/csv"
+        )
+
+# Instructions
+elif st.session_state.csv_data is None:
+    st.header("🚀 Getting Started")
+    
+    st.markdown("""
+    ### Welcome to the Cal Poly Pomona Dictionary Classifier
+    
+    This advanced text analysis tool helps you classify text data using keyword matching algorithms.
+    
+    **How to use:**
+    
+    1. **Upload your CSV file** using the sidebar (must contain 'ID' and 'Statement' columns)
+    2. **Modify keywords** using the keywords management section above
+    3. **Adjust settings** in the sidebar for case sensitivity and matching type
+    4. **Run classification** to process your data
+    5. **Review results** in the summary statistics and data preview
+    6. **Optional:** Upload ground truth data to see performance metrics
+    7. **Download** the classified data as a new CSV file
+    
+    **Expected CSV format:**
+    - **ID**: Unique identifier for each row
+    - **Statement**: Text content to be classified
+    
+    **Ground Truth format (optional):**
+    - **ID**: Unique identifier matching your main data
+    - **Mode_Researcher**: Binary classification (0 or 1)
+    """)
+    
+    # Sample data format
+    st.subheader("📋 Sample Data Format")
+    
+    sample_data = pd.DataFrame({
+        'ID': [1, 2, 3],
+        'Statement': [
+            'This classic design represents timeless elegance',
+            'Modern and trendy style for today',
+            'Refined craftsmanship with luxurious materials'
+        ]
+    })
+    
+    st.dataframe(sample_data, use_container_width=True)
+
+# Footer
+st.markdown("---")
+st.markdown(
+    """
+    <div style='text-align: center; color: #666; padding: 1rem;'>
+        Dictionary Classifier • Cal Poly Pomona • Text Analysis Tool<br>
+        Built with Streamlit 🚀
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
