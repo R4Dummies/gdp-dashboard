@@ -186,22 +186,25 @@ def classify_statements(df: pd.DataFrame, dictionary: List[str], text_column: st
         
         if ground_truth_column and ground_truth_column in df.columns:
             try:
-                ground_truth = int(row[ground_truth_column])
-                
-                # Calculate confusion matrix
-                if predicted == 1 and ground_truth == 1:
-                    true_positives += 1
-                    category = 'TP'
-                elif predicted == 1 and ground_truth == 0:
-                    false_positives += 1
-                    category = 'FP'
-                elif predicted == 0 and ground_truth == 1:
-                    false_negatives += 1
-                    category = 'FN'
-                else:
-                    true_negatives += 1
-                    category = 'TN'
+                ground_truth_value = row[ground_truth_column]
+                if not pd.isna(ground_truth_value):
+                    ground_truth = int(float(ground_truth_value))  # Handle both int and float strings
+                    
+                    # Calculate confusion matrix
+                    if predicted == 1 and ground_truth == 1:
+                        true_positives += 1
+                        category = 'TP'
+                    elif predicted == 1 and ground_truth == 0:
+                        false_positives += 1
+                        category = 'FP'
+                    elif predicted == 0 and ground_truth == 1:
+                        false_negatives += 1
+                        category = 'FN'
+                    else:
+                        true_negatives += 1
+                        category = 'TN'
             except (ValueError, TypeError):
+                # Keep ground_truth as None if conversion fails
                 pass
         
         result = {
@@ -343,16 +346,27 @@ def analyze_keywords(df: pd.DataFrame, dictionary: List[str], text_column: str, 
         total_positives = 0
         
         for _, row in df.iterrows():
-            statement = str(row[text_column]).lower()
-            contains_keyword = keyword.lower() in statement
-            ground_truth = int(row[ground_truth_column])
-            
-            if ground_truth == 1:
-                total_positives += 1
-                if contains_keyword:
-                    true_positives.append(row.to_dict())
-            elif ground_truth == 0 and contains_keyword:
-                false_positives.append(row.to_dict())
+            try:
+                statement = str(row[text_column]).lower()
+                contains_keyword = keyword.lower() in statement
+                
+                # Safely convert ground truth to integer
+                ground_truth_value = row[ground_truth_column]
+                if pd.isna(ground_truth_value):
+                    continue  # Skip rows with missing ground truth
+                
+                ground_truth = int(float(ground_truth_value))  # Handle both int and float strings
+                
+                if ground_truth == 1:
+                    total_positives += 1
+                    if contains_keyword:
+                        true_positives.append(row.to_dict())
+                elif ground_truth == 0 and contains_keyword:
+                    false_positives.append(row.to_dict())
+                    
+            except (ValueError, TypeError, KeyError):
+                # Skip rows where conversion fails
+                continue
         
         # Calculate metrics
         recall = len(true_positives) / total_positives if total_positives > 0 else 0
