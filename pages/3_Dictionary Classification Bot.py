@@ -2,10 +2,29 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
-import plotly.express as px
-import plotly.graph_objects as go
 from io import StringIO
+
+# Try to import sklearn, fall back to manual calculations if not available
+try:
+    from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    st.warning("⚠️ scikit-learn not found. Using built-in metric calculations.")
+
+# Try to import plotly, fall back to matplotlib if not available
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    try:
+        import matplotlib.pyplot as plt
+        MATPLOTLIB_AVAILABLE = True
+    except ImportError:
+        MATPLOTLIB_AVAILABLE = False
+        st.warning("⚠️ Neither plotly nor matplotlib found. Charts will be disabled.")
 
 # Page configuration
 st.set_page_config(
@@ -96,6 +115,26 @@ def classify_text(text, keywords, case_sensitive=False, exact_match=False):
     
     return 0
 
+def calculate_metrics_manual(y_true, y_pred):
+    """Manual calculation of metrics when sklearn is not available"""
+    # Convert to numpy arrays for easier calculation
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    
+    # Calculate confusion matrix components
+    tp = np.sum((y_true == 1) & (y_pred == 1))
+    fp = np.sum((y_true == 0) & (y_pred == 1))
+    tn = np.sum((y_true == 0) & (y_pred == 0))
+    fn = np.sum((y_true == 1) & (y_pred == 0))
+    
+    # Calculate metrics
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    accuracy = (tp + tn) / len(y_true) if len(y_true) > 0 else 0
+    
+    return precision, recall, f1, accuracy
+
 def calculate_metrics(classified_data, ground_truth_data):
     """Calculate performance metrics"""
     # Merge data on ID
@@ -111,13 +150,23 @@ def calculate_metrics(classified_data, ground_truth_data):
     y_true = merged_data['Mode_Researcher'].astype(int)
     y_pred = merged_data['tactic_present'].astype(int)
     
-    metrics = {
-        'precision': precision_score(y_true, y_pred, zero_division=0),
-        'recall': recall_score(y_true, y_pred, zero_division=0),
-        'f1': f1_score(y_true, y_pred, zero_division=0),
-        'accuracy': accuracy_score(y_true, y_pred),
-        'total_samples': len(merged_data)
-    }
+    if SKLEARN_AVAILABLE:
+        metrics = {
+            'precision': precision_score(y_true, y_pred, zero_division=0),
+            'recall': recall_score(y_true, y_pred, zero_division=0),
+            'f1': f1_score(y_true, y_pred, zero_division=0),
+            'accuracy': accuracy_score(y_true, y_pred),
+            'total_samples': len(merged_data)
+        }
+    else:
+        precision, recall, f1, accuracy = calculate_metrics_manual(y_true, y_pred)
+        metrics = {
+            'precision': precision,
+            'recall': recall,
+            'f1': f1,
+            'accuracy': accuracy,
+            'total_samples': len(merged_data)
+        }
     
     return metrics
 
@@ -301,14 +350,44 @@ if st.session_state.csv_data is not None and len(st.session_state.keywords) > 0:
         # Visualization
         st.subheader("📈 Distribution Chart")
         
-        # Create pie chart
-        fig = px.pie(
-            values=[no_matches, matches],
-            names=['No Match (0)', 'Match (1)'],
-            color_discrete_sequence=['#dc2626', '#154734'],
-            title="Classification Distribution"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if PLOTLY_AVAILABLE:
+            # Create pie chart with Plotly
+            fig = px.pie(
+                values=[no_matches, matches],
+                names=['No Match (0)', 'Match (1)'],
+                color_discrete_sequence=['#dc2626', '#154734'],
+                title="Classification Distribution"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        elif MATPLOTLIB_AVAILABLE:
+            # Create pie chart with Matplotlib
+            fig, ax = plt.subplots(figsize=(8, 6))
+            colors = ['#dc2626', '#154734']
+            wedges, texts, autotexts = ax.pie(
+                [no_matches, matches], 
+                labels=['No Match (0)', 'Match (1)'],
+                colors=colors,
+                autopct='%1.1f%%',
+                startangle=90
+            )
+            ax.set_title("Classification Distribution", fontsize=16, fontweight='bold')
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            # Text-based visualization
+            st.write("**Distribution Summary:**")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("No Match (0)", no_matches, f"{(no_matches/total_rows*100):.1f}%")
+            with col2:
+                st.metric("Match (1)", matches, f"{(matches/total_rows*100):.1f}%")
+            
+            # Simple bar chart using Streamlit's built-in chart
+            chart_data = pd.DataFrame({
+                'Classification': ['No Match (0)', 'Match (1)'],
+                'Count': [no_matches, matches]
+            })
+            st.bar_chart(chart_data.set_index('Classification'))
         
         # Performance metrics (if ground truth is available)
         if st.session_state.ground_truth_data is not None:
@@ -414,8 +493,27 @@ st.markdown(
     """
     <div style='text-align: center; color: #666; padding: 1rem;'>
         Dictionary Classifier • Cal Poly Pomona • Text Analysis Tool<br>
-        Built with Streamlit 🚀
+        Built with Streamlit 🚀<br>
+        <small>Note: For best experience, install plotly and scikit-learn</small>
     </div>
     """, 
     unsafe_allow_html=True
 )
+
+# Installation instructions in sidebar
+if not SKLEARN_AVAILABLE or not PLOTLY_AVAILABLE:
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📦 Optional Dependencies")
+    st.sidebar.markdown("""
+    For enhanced features, install:
+    ```bash
+    pip install plotly scikit-learn
+    ```
+    
+    **Current status:**
+    - scikit-learn: {}
+    - plotly: {}
+    """.format(
+        "✅ Available" if SKLEARN_AVAILABLE else "❌ Missing",
+        "✅ Available" if PLOTLY_AVAILABLE else "❌ Missing"
+    ))
