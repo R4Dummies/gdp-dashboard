@@ -75,11 +75,11 @@ def preprocess_data(df, id_column, speaker_column, turn_column, transcript_colum
         conversation_id = row[id_column]
         speaker = row[speaker_column]
         turn = row[turn_column]
-        transcript = row[transcript_column]
+        transcript_text = row[transcript_column]
         
         # Clean the transcript
         cleaned_transcript = clean_text(
-            transcript, 
+            transcript_text, 
             emoji_removal=settings['remove_emojis'],
             whitespace_normalization=settings['normalize_whitespace']
         )
@@ -92,14 +92,13 @@ def preprocess_data(df, id_column, speaker_column, turn_column, transcript_colum
         )
         
         # Create rows for each sentence
-        for i, sentence in enumerate(sentences, 1):
+        for sentence in sentences:
             output_data.append({
-                'Call_ID': conversation_id,
-                'Speaker': speaker,
-                'Turn': turn,
-                'Sentence_ID': i,
-                'Original_Transcript': transcript,  # Keep original transcript as context
-                'Processed_Statement': sentence
+                'shortcode': conversation_id,
+                'turn': turn,
+                'caption': transcript_text,  # Original transcript as caption
+                'transcript': sentence,      # Individual sentence as transcript
+                'post_url': ''              # Empty post_url column
             })
     
     # Create output dataframe
@@ -214,8 +213,8 @@ if uploaded_file is not None:
                         avg_sentences = len(result_df) / len(df) if len(df) > 0 else 0
                         st.metric("Avg Sentences/Record", f"{avg_sentences:.2f}")
                     with col4:
-                        unique_conversations = result_df['Call_ID'].nunique()
-                        st.metric("Unique Conversations", unique_conversations)
+                        unique_shortcodes = result_df['shortcode'].nunique()
+                        st.metric("Unique Shortcodes", unique_shortcodes)
                     
                     # Download button
                     st.header("💾 Download Results")
@@ -239,18 +238,17 @@ if uploaded_file is not None:
                     sample_records = df.head(3)
                     
                     for idx, row in sample_records.iterrows():
-                        with st.expander(f"Record {idx + 1}: {row[id_column]} - {row[speaker_column]}"):
+                        with st.expander(f"Record {idx + 1}: {row[id_column]} - Turn {row[turn_column]}"):
                             st.subheader("Original Transcript:")
                             st.text(row[transcript_column])
                             
                             st.subheader("Processed Sentences:")
                             record_sentences = result_df[
-                                (result_df['Call_ID'] == row[id_column]) & 
-                                (result_df['Speaker'] == row[speaker_column]) &
-                                (result_df['Turn'] == row[turn_column])
+                                (result_df['shortcode'] == row[id_column]) & 
+                                (result_df['turn'] == row[turn_column])
                             ]
-                            for _, sentence_row in record_sentences.iterrows():
-                                st.write(f"**Sentence {sentence_row['Sentence_ID']}:** {sentence_row['Processed_Statement']}")
+                            for idx2, sentence_row in record_sentences.iterrows():
+                                st.write(f"**Sentence {idx2 + 1}:** {sentence_row['transcript']}")
                     
                 except Exception as e:
                     st.error(f"❌ Error processing dataset: {str(e)}")
@@ -281,10 +279,9 @@ else:
     
     ### Output Format
     The processed dataset will have these columns:
-    - **Call_ID**: Original conversation identifier
-    - **Speaker**: Speaker information
-    - **Turn**: Turn number/sequence
-    - **Sentence_ID**: Sequential number for each sentence within a turn
-    - **Original_Transcript**: Original transcript text (for reference)
-    - **Processed_Statement**: Individual sentence extracted from the transcript
+    - **shortcode**: Original conversation identifier
+    - **turn**: Turn number/sequence
+    - **caption**: Original transcript text (for reference)
+    - **transcript**: Individual sentence extracted from the original transcript
+    - **post_url**: Empty column (for compatibility)
     """)
