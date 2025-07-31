@@ -1,18 +1,17 @@
 """
-Enhanced Text Transformation Streamlit App
-Transform your text data into sentence-level analysis format with improved UI/UX
+NLTK-Free Text Transformation Streamlit App
+No external NLP dependencies required
 """
 
 import streamlit as st
 import pandas as pd
-import nltk
 import re
 import io
 import json
-from typing import List, Dict, Any
+from typing import List, Dict
 from datetime import datetime
 
-# Custom CSS for better styling
+# Custom CSS for styling
 def load_custom_css():
     st.markdown("""
     <style>
@@ -33,30 +32,6 @@ def load_custom_css():
         margin: 1rem 0;
     }
     
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        text-align: center;
-    }
-    
-    .success-box {
-        background: #d4edda;
-        border: 1px solid #c3e6cb;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
-    .warning-box {
-        background: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 5px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    
     .stButton > button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -64,108 +39,93 @@ def load_custom_css():
         border-radius: 25px;
         padding: 0.5rem 2rem;
         font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-    }
-    
-    .sidebar .stSelectbox > div > div {
-        background-color: #f1f3f6;
-    }
-    
-    .uploadedfile {
-        border: 2px dashed #667eea;
-        border-radius: 10px;
-        padding: 2rem;
-        text-align: center;
-        margin: 1rem 0;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# Download required NLTK data and setup sentence tokenizer
-@st.cache_resource
-def setup_sentence_tokenizer():
-    """Setup sentence tokenizer with fallback"""
-    try:
-        import nltk
-        nltk.download('punkt_tab', quiet=True)
-        nltk.download('punkt', quiet=True)
-        from nltk.tokenize import sent_tokenize
-        # Test if it works
-        sent_tokenize("Test sentence.")
-        return sent_tokenize, "NLTK"
-    except Exception as e:
-        st.warning(f"NLTK setup failed ({str(e)}), using fallback tokenizer")
-        def sent_tokenize(text):
-            sentences = re.split(r'[.!?]+', text)
-            return [s.strip() for s in sentences if s.strip()]
-        return sent_tokenize, "Fallback"
-
-# Default cleaning patterns - can be customized by users
-DEFAULT_PATTERNS = {
-    "urls": r'http[s]?://\S+',
-    "hashtags": r'#\w+',
-    "mentions": r'@\w+',
-    "emojis": r'[^\w\s.,!?\'"()-]',
-    "extra_whitespace": r'\s+'
-}
+def advanced_sentence_tokenize(text: str) -> List[str]:
+    """
+    Advanced sentence tokenizer without external dependencies
+    Handles common abbreviations and edge cases
+    """
+    if not text or not text.strip():
+        return []
+    
+    # Common abbreviations that shouldn't trigger sentence breaks
+    abbreviations = {
+        'dr', 'mr', 'mrs', 'ms', 'prof', 'vs', 'etc', 'inc', 'ltd', 'co',
+        'corp', 'dept', 'govt', 'univ', 'assn', 'bros', 'rep', 'sen'
+    }
+    
+    # Protect abbreviations by temporarily replacing periods
+    protected_text = text
+    for abbr in abbreviations:
+        pattern = rf'\b{re.escape(abbr)}\.(?=\s+[a-z])'
+        protected_text = re.sub(pattern, f'{abbr}<!PERIOD!>', protected_text, flags=re.IGNORECASE)
+    
+    # Split on sentence boundaries
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', protected_text)
+    
+    # Clean up and restore periods
+    cleaned_sentences = []
+    for sentence in sentences:
+        sentence = sentence.replace('<!PERIOD!>', '.')
+        sentence = sentence.strip()
+        
+        # Filter out very short or empty sentences
+        if sentence and len(sentence.split()) >= 2:
+            cleaned_sentences.append(sentence)
+    
+    return cleaned_sentences
 
 def extract_hashtags(text: str) -> str:
-    """Extract hashtags from text and return them as a single string"""
+    """Extract hashtags from text"""
     if not isinstance(text, str):
         return ""
-    
     hashtags = re.findall(r'#\w+', text)
     return ' '.join(hashtags) if hashtags else ""
 
-def clean_text(text: str, patterns: Dict[str, str] = None) -> str:
-    """Clean text using customizable patterns"""
+def clean_text(text: str, remove_urls: bool = True, remove_mentions: bool = True) -> str:
+    """Clean text with configurable options"""
     if not isinstance(text, str) or not text.strip():
         return ""
     
-    if patterns is None:
-        patterns = DEFAULT_PATTERNS
+    # Remove URLs
+    if remove_urls:
+        text = re.sub(r'http[s]?://\S+|www\.\S+', '', text)
     
-    # Apply cleaning patterns
-    for pattern_name, pattern in patterns.items():
-        if pattern_name == "extra_whitespace":
-            text = re.sub(pattern, ' ', text)
-        else:
-            text = re.sub(pattern, '', text)
+    # Remove mentions
+    if remove_mentions:
+        text = re.sub(r'@\w+', '', text)
+    
+    # Remove hashtags (they'll be added separately if needed)
+    text = re.sub(r'#\w+', '', text)
+    
+    # Remove emojis and special characters (keep basic punctuation)
+    text = re.sub(r'[^\w\s.,!?\'"()-]', '', text)
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
     
     return text.strip()
 
-def is_punctuation_only(text: str) -> bool:
-    """Check if text contains only punctuation marks and whitespace"""
+def is_meaningful_text(text: str) -> bool:
+    """Check if text contains meaningful content"""
     if not text:
-        return True
-    cleaned = re.sub(r'\s+', '', text)
-    if not cleaned:
-        return True
-    return bool(re.match(r'^[^\w#@]+$', cleaned))
-
-def split_into_sentences(text: str, sent_tokenize) -> List[str]:
-    """Split text into sentences using tokenizer"""
-    if not text:
-        return []
+        return False
     
-    if text[-1] not in '.!?':
-        text = text + '.'
+    # Remove punctuation and whitespace
+    cleaned = re.sub(r'[^\w]', '', text)
     
-    sentences = sent_tokenize(text)
-    return [sent.strip() for sent in sentences if sent.strip() and not is_punctuation_only(sent.strip())]
+    # Must have at least some letters
+    return bool(cleaned and re.search(r'[a-zA-Z]', cleaned))
 
 def transform_data(df: pd.DataFrame, id_column: str, context_column: str, 
-                  include_hashtags: bool = True, custom_patterns: Dict[str, str] = None) -> pd.DataFrame:
-    """Transform dataframe into sentence-level data with progress tracking"""
-    sent_tokenize, tokenizer_type = setup_sentence_tokenizer()
+                  include_hashtags: bool = True) -> pd.DataFrame:
+    """Transform dataframe into sentence-level data"""
     transformed_rows = []
     
-    # Progress bar
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -182,30 +142,31 @@ def transform_data(df: pd.DataFrame, id_column: str, context_column: str,
         
         if not context:
             continue
-            
-        # Clean the context text
-        cleaned_context = clean_text(context, custom_patterns)
         
-        # Extract hashtags if requested
+        # Extract hashtags before cleaning
         hashtags = extract_hashtags(context) if include_hashtags else ""
         
-        # Split into sentences
-        sentences = split_into_sentences(cleaned_context, sent_tokenize)
+        # Clean the text
+        cleaned_text = clean_text(context)
         
-        # Add hashtags as a separate sentence if they exist
-        if hashtags and not is_punctuation_only(hashtags):
+        # Split into sentences
+        sentences = advanced_sentence_tokenize(cleaned_text)
+        
+        # Add hashtags as separate sentence if they exist
+        if hashtags and is_meaningful_text(hashtags):
             sentences.append(hashtags)
         
         # Create rows for each sentence
         for sentence_id, sentence in enumerate(sentences, 1):
-            transformed_rows.append({
-                'ID': row_id,
-                'Sentence_ID': sentence_id,
-                'Context': context,
-                'Statement': sentence,
-                'Character_Count': len(sentence),
-                'Word_Count': len(sentence.split())
-            })
+            if is_meaningful_text(sentence):
+                transformed_rows.append({
+                    'ID': row_id,
+                    'Sentence_ID': sentence_id,
+                    'Context': context,
+                    'Statement': sentence,
+                    'Character_Count': len(sentence),
+                    'Word_Count': len(sentence.split())
+                })
     
     # Clear progress indicators
     progress_bar.empty()
@@ -213,396 +174,204 @@ def transform_data(df: pd.DataFrame, id_column: str, context_column: str,
     
     return pd.DataFrame(transformed_rows)
 
-def display_data_summary(df: pd.DataFrame, title: str):
-    """Display a nice summary of the dataframe"""
-    st.markdown(f"### {title}")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("📊 Rows", f"{len(df):,}")
-    with col2:
-        st.metric("📋 Columns", len(df.columns))
-    with col3:
-        st.metric("💾 Size", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
-    with col4:
-        null_count = df.isnull().sum().sum()
-        st.metric("❌ Null Values", f"{null_count:,}")
-
-def create_pattern_editor():
-    """Create an expandable pattern editor for text cleaning"""
-    with st.expander("🔧 Advanced: Customize Text Cleaning Patterns", expanded=False):
-        st.markdown("**Modify the regular expressions used for text cleaning:**")
-        
-        patterns = {}
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            patterns["urls"] = st.text_input(
-                "URLs Pattern", 
-                value=DEFAULT_PATTERNS["urls"],
-                help="Pattern to remove URLs"
-            )
-            patterns["hashtags"] = st.text_input(
-                "Hashtags Pattern", 
-                value=DEFAULT_PATTERNS["hashtags"],
-                help="Pattern to remove hashtags (when not including them separately)"
-            )
-            patterns["mentions"] = st.text_input(
-                "Mentions Pattern", 
-                value=DEFAULT_PATTERNS["mentions"],
-                help="Pattern to remove @mentions"
-            )
-        
-        with col2:
-            patterns["emojis"] = st.text_input(
-                "Emojis/Special Chars", 
-                value=DEFAULT_PATTERNS["emojis"],
-                help="Pattern to remove emojis and special characters"
-            )
-            patterns["extra_whitespace"] = st.text_input(
-                "Extra Whitespace", 
-                value=DEFAULT_PATTERNS["extra_whitespace"],
-                help="Pattern to normalize whitespace"
-            )
-        
-        # Test pattern functionality
-        test_text = st.text_area(
-            "Test your patterns:", 
-            value="Check out this link http://example.com @user #hashtag 🎉 Multiple   spaces!",
-            help="Enter text to see how your patterns will clean it"
-        )
-        
-        if st.button("Test Patterns"):
-            try:
-                cleaned = clean_text(test_text, patterns)
-                st.success(f"**Original:** {test_text}")
-                st.success(f"**Cleaned:** {cleaned}")
-            except Exception as e:
-                st.error(f"Pattern error: {str(e)}")
-        
-        return patterns
-
 def main():
     st.set_page_config(
-        page_title="Enhanced Text Transformation App",
+        page_title="Text Transformation App",
         page_icon="🚀",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        layout="wide"
     )
     
-    # Load custom CSS
     load_custom_css()
     
-    # Main header
+    # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🚀 Enhanced Text Transformation App</h1>
-        <p>Transform your text data into sentence-level analysis format with advanced features</p>
+        <h1>🚀 Text Transformation App</h1>
+        <p>Transform your text data into sentence-level format (No external dependencies)</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar configuration
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # File upload with custom styling
         uploaded_file = st.file_uploader(
-            "📁 Upload your CSV file",
+            "📁 Upload CSV file",
             type=['csv'],
-            help="Supported formats: CSV files only"
+            help="Upload your CSV file containing text data"
         )
         
-        # Show file info if uploaded
-        if uploaded_file is not None:
+        if uploaded_file:
             file_size = len(uploaded_file.getvalue()) / 1024
-            st.info(f"📄 **{uploaded_file.name}**\n\n💾 Size: {file_size:.1f} KB")
+            st.info(f"📄 **{uploaded_file.name}**\n💾 Size: {file_size:.1f} KB")
     
     if uploaded_file is not None:
         try:
-            # Read and display file info
             df = pd.read_csv(uploaded_file)
             
-            # Data summary
-            display_data_summary(df, "📊 Uploaded Data Summary")
+            # Display file info
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 Rows", f"{len(df):,}")
+            with col2:
+                st.metric("📋 Columns", len(df.columns))
+            with col3:
+                st.metric("💾 Memory", f"{df.memory_usage(deep=True).sum() / 1024:.1f} KB")
             
-            # Show data preview with better formatting
+            # Data preview
             with st.expander("👀 Data Preview", expanded=True):
-                st.dataframe(
-                    df.head(10), 
-                    use_container_width=True,
-                    height=300
-                )
+                st.dataframe(df.head(), use_container_width=True)
             
-            # Sidebar configuration continues
+            # Column selection
             with st.sidebar:
                 st.markdown("---")
-                st.subheader("🎯 Column Mapping")
+                st.subheader("🎯 Column Selection")
                 
                 columns = list(df.columns)
                 
                 id_column = st.selectbox(
-                    "🆔 Select ID Column",
+                    "🆔 ID Column",
                     options=columns,
-                    help="Column containing unique identifiers"
+                    help="Column with unique identifiers"
                 )
                 
                 context_column = st.selectbox(
-                    "📝 Select Context Column", 
+                    "📝 Text Column",
                     options=columns,
-                    help="Column containing text to transform"
+                    help="Column containing text to process"
                 )
                 
                 st.markdown("---")
-                st.subheader("⚡ Processing Options")
+                st.subheader("⚙️ Options")
                 
                 include_hashtags = st.checkbox(
-                    "Include hashtags as separate sentences",
+                    "Include hashtags separately",
                     value=True,
-                    help="Extract hashtags and create separate sentence entries"
-                )
-                
-                use_custom_patterns = st.checkbox(
-                    "Use custom cleaning patterns",
-                    value=False,
-                    help="Enable advanced pattern customization"
+                    help="Extract hashtags as separate sentences"
                 )
             
-            # Pattern editor (main area)
-            custom_patterns = DEFAULT_PATTERNS
-            if use_custom_patterns:
-                custom_patterns = create_pattern_editor()
-            
-            # Column validation and preview
+            # Validation and transformation
             if id_column and context_column:
                 if id_column == context_column:
-                    st.error("❌ ID and Context columns must be different!")
+                    st.error("❌ ID and Text columns must be different!")
                 else:
-                    # Show sample of selected columns
-                    st.markdown("### 🔍 Selected Columns Preview")
+                    # Show selected columns
+                    st.markdown("### 🔍 Selected Columns")
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.markdown(f"**🆔 ID Column: `{id_column}`**")
-                        st.write(df[id_column].head())
+                        st.markdown(f"**🆔 ID: `{id_column}`**")
+                        st.write(df[id_column].head(3))
                     
                     with col2:
-                        st.markdown(f"**📝 Context Column: `{context_column}`**")
-                        st.write(df[context_column].head())
+                        st.markdown(f"**📝 Text: `{context_column}`**")
+                        st.write(df[context_column].head(3))
                     
                     # Transform button
                     if st.button("🚀 Transform Data", type="primary", use_container_width=True):
                         start_time = datetime.now()
                         
                         try:
-                            with st.spinner("🔄 Transforming your data..."):
-                                transformed_df = transform_data(
-                                    df, id_column, context_column, 
-                                    include_hashtags, custom_patterns
-                                )
+                            transformed_df = transform_data(df, id_column, context_column, include_hashtags)
                             
                             end_time = datetime.now()
                             processing_time = (end_time - start_time).total_seconds()
                             
                             if len(transformed_df) > 0:
                                 st.balloons()
-                                st.success(f"✅ Transformation completed in {processing_time:.2f} seconds!")
+                                st.success(f"✅ Completed in {processing_time:.2f} seconds!")
                                 
-                                # Results summary
-                                display_data_summary(transformed_df, "📈 Transformation Results")
-                                
-                                # Additional metrics
+                                # Results metrics
                                 col1, col2, col3, col4 = st.columns(4)
                                 with col1:
-                                    st.metric("📊 Original Records", len(df))
+                                    st.metric("📊 Original", len(df))
                                 with col2:
-                                    st.metric("📝 Generated Sentences", len(transformed_df))
+                                    st.metric("📝 Sentences", len(transformed_df))
                                 with col3:
-                                    avg_sentences = len(transformed_df) / len(df) if len(df) > 0 else 0
-                                    st.metric("📈 Avg Sentences/Record", f"{avg_sentences:.1f}")
+                                    avg_sentences = len(transformed_df) / len(df)
+                                    st.metric("📈 Avg/Record", f"{avg_sentences:.1f}")
                                 with col4:
-                                    avg_words = transformed_df['Word_Count'].mean() if 'Word_Count' in transformed_df.columns else 0
-                                    st.metric("📏 Avg Words/Sentence", f"{avg_words:.1f}")
+                                    avg_words = transformed_df['Word_Count'].mean()
+                                    st.metric("📏 Avg Words", f"{avg_words:.1f}")
                                 
-                                # Show results with tabs
-                                tab1, tab2, tab3 = st.tabs(["📋 Preview", "📊 Statistics", "📁 Column Info"])
+                                # Results display
+                                st.markdown("### 📋 Results")
+                                st.dataframe(transformed_df.head(15), use_container_width=True)
                                 
-                                with tab1:
-                                    st.dataframe(
-                                        transformed_df.head(20), 
-                                        use_container_width=True,
-                                        height=400
-                                    )
+                                # Download
+                                csv_buffer = io.StringIO()
+                                transformed_df.to_csv(csv_buffer, index=False)
                                 
-                                with tab2:
-                                    col1, col2 = st.columns(2)
-                                    with col1:
-                                        st.markdown("**Character Count Distribution**")
-                                        st.bar_chart(transformed_df['Character_Count'].value_counts().head(10))
-                                    with col2:
-                                        st.markdown("**Word Count Distribution**")
-                                        st.bar_chart(transformed_df['Word_Count'].value_counts().head(10))
-                                
-                                with tab3:
-                                    column_info = []
-                                    for col in transformed_df.columns:
-                                        column_info.append({
-                                            "Column": col,
-                                            "Type": str(transformed_df[col].dtype),
-                                            "Non-null": f"{transformed_df[col].count():,}",
-                                            "Unique Values": f"{transformed_df[col].nunique():,}",
-                                            "Sample": str(transformed_df[col].iloc[0]) if len(transformed_df) > 0 else "N/A"
-                                        })
-                                    st.dataframe(pd.DataFrame(column_info), use_container_width=True)
-                                
-                                # Download section
-                                st.markdown("---")
-                                st.markdown("### 💾 Download Results")
-                                
-                                col1, col2 = st.columns(2)
-                                
-                                with col1:
-                                    # CSV download
-                                    csv_buffer = io.StringIO()
-                                    transformed_df.to_csv(csv_buffer, index=False)
-                                    csv_data = csv_buffer.getvalue()
-                                    
-                                    st.download_button(
-                                        label="📥 Download as CSV",
-                                        data=csv_data,
-                                        file_name=f"transformed_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                                        mime="text/csv",
-                                        use_container_width=True
-                                    )
-                                
-                                with col2:
-                                    # JSON download
-                                    json_data = transformed_df.to_json(orient='records', indent=2)
-                                    st.download_button(
-                                        label="📥 Download as JSON",
-                                        data=json_data,
-                                        file_name=f"transformed_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                                        mime="application/json",
-                                        use_container_width=True
-                                    )
-                                
+                                st.download_button(
+                                    label="📥 Download CSV",
+                                    data=csv_buffer.getvalue(),
+                                    file_name=f"transformed_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                             else:
-                                st.warning("⚠️ No sentences were generated. Please check your data and settings.")
-                                
+                                st.warning("⚠️ No sentences generated. Check your data.")
+                        
                         except Exception as e:
-                            st.error(f"❌ Error during transformation: {str(e)}")
-                            st.info("💡 Try checking your column selections and data format.")
+                            st.error(f"❌ Error: {str(e)}")
             
         except Exception as e:
-            st.error(f"❌ Error reading file: {str(e)}")
-            st.info("💡 Please ensure your file is in valid CSV format with proper encoding.")
+            st.error(f"❌ File error: {str(e)}")
+            st.info("💡 Ensure your file is valid CSV format")
     
     else:
-        # Welcome section with instructions
+        # Instructions
         st.markdown("""
         <div class="feature-card">
-            <h3>👋 Welcome to the Enhanced Text Transformation App!</h3>
-            <p>Upload your CSV file to get started with advanced text processing capabilities.</p>
+            <h3>👋 Welcome!</h3>
+            <p>This app transforms text data into sentence-level format without requiring external NLP libraries.</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Features showcase
-        col1, col2, col3 = st.columns(3)
+        st.markdown("### 📋 Instructions")
+        st.markdown("""
+        1. **📁 Upload** your CSV file using the sidebar
+        2. **🎯 Select** ID and text columns from dropdowns  
+        3. **⚙️ Configure** processing options
+        4. **🚀 Transform** your data with one click
+        5. **📥 Download** results as CSV
+        """)
         
-        with col1:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>🎯 Smart Processing</h4>
-                <ul>
-                    <li>Intelligent sentence splitting</li>
-                    <li>Hashtag extraction</li>
-                    <li>Customizable text cleaning</li>
-                    <li>Progress tracking</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>📊 Rich Analytics</h4>
-                <ul>
-                    <li>Data quality metrics</li>
-                    <li>Processing statistics</li>
-                    <li>Word/character counts</li>
-                    <li>Distribution charts</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown("""
-            <div class="feature-card">
-                <h4>💾 Multiple Exports</h4>
-                <ul>
-                    <li>CSV format</li>
-                    <li>JSON format</li>
-                    <li>Timestamped filenames</li>
-                    <li>Detailed column info</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Instructions
-        st.markdown("### 📋 How to Use")
-        
-        instructions = [
-            "📁 **Upload**: Select your CSV file using the sidebar uploader",
-            "🎯 **Configure**: Choose your ID and Context columns from the dropdown menus", 
-            "⚙️ **Customize**: Optionally modify text cleaning patterns and processing options",
-            "🚀 **Transform**: Click the transform button to process your data",
-            "📊 **Analyze**: Review the results, statistics, and data quality metrics",
-            "💾 **Download**: Export your transformed data in CSV or JSON format"
-        ]
-        
-        for i, instruction in enumerate(instructions, 1):
-            st.markdown(f"{i}. {instruction}")
-        
-        # Example section
-        st.markdown("---")
-        st.markdown("### 💡 Example Transformation")
-        
+        # Example
+        st.markdown("### 💡 Example")
         example_input = pd.DataFrame({
-            "post_id": ["POST_001", "POST_002"],
-            "caption": [
-                "Amazing sunset at the beach! 🌅 #summer #vacation #blessed",
-                "New product launch today. Very excited about this! #startup #innovation"
+            "id": ["1", "2"],
+            "text": [
+                "Great day! #happy #sunshine",
+                "New project starting. Excited! #work"
             ]
         })
         
         example_output = pd.DataFrame({
-            "ID": ["POST_001", "POST_001", "POST_002", "POST_002", "POST_002"],
+            "ID": ["1", "1", "2", "2", "2"],
             "Sentence_ID": [1, 2, 1, 2, 3],
             "Context": [
-                "Amazing sunset at the beach! 🌅 #summer #vacation #blessed",
-                "Amazing sunset at the beach! 🌅 #summer #vacation #blessed",
-                "New product launch today. Very excited about this! #startup #innovation",
-                "New product launch today. Very excited about this! #startup #innovation", 
-                "New product launch today. Very excited about this! #startup #innovation"
+                "Great day! #happy #sunshine",
+                "Great day! #happy #sunshine",
+                "New project starting. Excited! #work",
+                "New project starting. Excited! #work",
+                "New project starting. Excited! #work"
             ],
             "Statement": [
-                "Amazing sunset at the beach!",
-                "#summer #vacation #blessed",
-                "New product launch today.",
-                "Very excited about this!",
-                "#startup #innovation"
-            ],
-            "Character_Count": [29, 27, 26, 25, 20],
-            "Word_Count": [5, 3, 4, 4, 2]
+                "Great day!",
+                "#happy #sunshine", 
+                "New project starting.",
+                "Excited!",
+                "#work"
+            ]
         })
         
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.markdown("**📥 Input Data:**")
+            st.markdown("**Input:**")
             st.dataframe(example_input, use_container_width=True)
-        
         with col2:
-            st.markdown("**📤 Output Data:**")
+            st.markdown("**Output:**")
             st.dataframe(example_output, use_container_width=True)
 
 if __name__ == "__main__":
