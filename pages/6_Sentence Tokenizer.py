@@ -7,8 +7,6 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-import plotly.express as px
-import plotly.graph_objects as go
 from typing import List
 import time
 
@@ -211,39 +209,25 @@ def transform_data(df, id_column, context_column, include_hashtags=True, progres
     return pd.DataFrame(transformed_rows)
 
 def create_analytics_charts(original_df, transformed_df):
-    """Create fun analytics charts"""
+    """Create analytics using Streamlit's built-in charts"""
     # Chart 1: Sentences per record distribution
     sentences_per_record = transformed_df.groupby('ID').size().reset_index(name='sentence_count')
     
-    fig1 = px.histogram(
-        sentences_per_record, 
-        x='sentence_count',
-        title="📊 Distribution of Sentences per Record",
-        color_discrete_sequence=['#FF6B6B']
-    )
-    fig1.update_layout(
-        xaxis_title="Number of Sentences",
-        yaxis_title="Number of Records",
-        showlegend=False
-    )
+    # Use Streamlit's native bar chart
+    st.subheader("📊 Distribution of Sentences per Record")
+    hist_data = sentences_per_record['sentence_count'].value_counts().sort_index()
+    st.bar_chart(hist_data)
     
     # Chart 2: Top records by sentence count
     top_records = sentences_per_record.nlargest(10, 'sentence_count')
     
-    fig2 = px.bar(
-        top_records,
-        x='ID',
-        y='sentence_count',
-        title="🏆 Top 10 Records by Sentence Count",
-        color='sentence_count',
-        color_continuous_scale='Viridis'
-    )
-    fig2.update_layout(
-        xaxis_title="Record ID",
-        yaxis_title="Number of Sentences"
-    )
+    st.subheader("🏆 Top 10 Records by Sentence Count")
+    if len(top_records) > 0:
+        # Create a simple chart using Streamlit
+        chart_data = top_records.set_index('ID')['sentence_count']
+        st.bar_chart(chart_data)
     
-    return fig1, fig2
+    return None, None
 
 def show_animated_success():
     """Show animated success message"""
