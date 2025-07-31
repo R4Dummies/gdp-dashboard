@@ -104,12 +104,12 @@ def transform_data(df, id_column, context_column, include_hashtags=True):
 
 def main():
     st.set_page_config(
-        page_title="Text Transformation App",
-        page_icon="📝",
+        page_title="Sentence Tokenizer App",
+        page_icon="🔤",
         layout="wide"
     )
     
-    st.title("📝 Text Transformation App")
+    st.title("🔤 Sentence Tokenizer App")
     st.markdown("Transform your text data into sentence-level analysis format")
     
     # Add info about no dependencies
