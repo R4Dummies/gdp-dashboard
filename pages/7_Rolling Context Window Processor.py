@@ -1,353 +1,264 @@
-"""
-Instagram Caption Transformation Streamlit App
-Based on original by Dr. Yufan (Frank) Lin
-Modified to be a web app with configurable preprocessing options
-"""
-
 import streamlit as st
 import pandas as pd
-import nltk
 import re
-import logging
-import emoji
-import csv
-from typing import List, Dict, Optional
-from nltk.tokenize import sent_tokenize
-from unidecode import unidecode
 import io
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+def clean_text(text, emoji_removal=True, whitespace_normalization=True):
+    """Clean text by removing emojis and normalizing whitespace"""
+    if pd.isna(text):
+        return ""
+    
+    text = str(text)
+    
+    if emoji_removal:
+        # Remove emojis (basic Unicode ranges)
+        emoji_pattern = re.compile("["
+                                 u"\U0001F600-\U0001F64F"  # emoticons
+                                 u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                                 u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                                 u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                                 u"\U00002702-\U000027B0"
+                                 u"\U000024C2-\U0001F251"
+                                 "]+", flags=re.UNICODE)
+        text = emoji_pattern.sub('', text)
+    
+    if whitespace_normalization:
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
 
-class TextPreprocessor:
-    """Class to handle text preprocessing operations for Instagram captions"""
-
-    def __init__(self, config: Dict):
-        self.config = config
-        self.url_pattern = re.compile(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')
-        self.email_pattern = re.compile(r'\S+@\S+')
-        self.hashtag_pattern = re.compile(r'#[\w\d]+')
-        self.mention_pattern = re.compile(r'@[\w\d]+')
-
-    def remove_emoji(self, text: str) -> str:
-        """Remove emoji characters from text"""
-        if self.config.get('remove_emojis', True):
-            return emoji.replace_emoji(text, replace='')
-        return text
-
-    def clean_text(self, text: str) -> str:
-        """Clean and normalize Instagram caption text"""
-        if not isinstance(text, str):
-            return self.config.get('empty_text_replacement', "[PAD]")
+def tokenize_sentences(text, sentence_endings='.!?', preserve_hashtags=True):
+    """Simple sentence tokenization with customizable parameters"""
+    if pd.isna(text) or text == "":
+        return []
+    
+    text = str(text)
+    
+    if preserve_hashtags:
+        # First, separate hashtags at the end
+        hashtag_match = re.search(r'(\s+#\w+(?:\s+#\w+)*)\s*$', text)
+        hashtags = hashtag_match.group(1).strip() if hashtag_match else ""
         
-        try:
-            # Remove emojis if configured
-            if self.config.get('remove_emojis', True):
-                text = self.remove_emoji(text)
-
-            # Normalize text with unidecode if configured
-            if self.config.get('normalize_unicode', True):
-                text = unidecode(text)
-
-            # Remove URLs if configured
-            if self.config.get('remove_urls', True):
-                text = self.url_pattern.sub('', text)
-            
-            # Remove email addresses if configured
-            if self.config.get('remove_emails', True):
-                text = self.email_pattern.sub('', text)
-            
-            # Remove hashtags if configured
-            if self.config.get('remove_hashtags', True):
-                text = self.hashtag_pattern.sub('', text)
-            
-            # Remove mentions if configured
-            if self.config.get('remove_mentions', True):
-                text = self.mention_pattern.sub('', text)
-
-            # Replace newlines with spaces if configured
-            if self.config.get('replace_newlines', True):
-                text = text.replace('\n', ' ')
-
-            # Remove extra spaces and strip
-            if self.config.get('normalize_whitespace', True):
-                text = ' '.join(text.split())
-
-            return text if text.strip() else self.config.get('empty_text_replacement', "[PAD]")
-        except Exception as e:
-            logger.error(f"Error cleaning text: {str(e)}")
-            return self.config.get('empty_text_replacement', "[PAD]")
-
-    def split_sentences(self, caption: str) -> List[str]:
-        """Split caption text into sentences using NLTK"""
-        try:
-            # Handle Instagram captions that might not end with proper punctuation
-            if self.config.get('add_period_if_missing', True) and caption and not caption[-1] in '.!?':
-                caption = caption + '.'
-
-            sentences = sent_tokenize(caption)
-            # Filter out empty sentences
-            return [sent.strip() for sent in sentences if sent.strip()]
-        except Exception as e:
-            logger.error(f"Error splitting sentences: {str(e)}")
-            return []
-
-    def transform_caption_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Transform Instagram caption dataframe into sentence-level data with specific columns"""
-        transformed_rows = []
-
-        for _, row in df.iterrows():
-            # Skip if caption is missing
-            if pd.isna(row['caption']):
-                continue
-
-            sentences = self.split_sentences(row['cleaned_caption'])
-            for turn, sentence in enumerate(sentences, 1):
-                transformed_row = {
-                    'shortcode': row.get('shortcode', row.get('post_id', '')),
-                    'turn': turn,
-                    'caption': row['caption'],
-                    'transcript': sentence,
-                    'post_url': row.get('post_url', '')
-                }
-                transformed_rows.append(transformed_row)
-
-        return pd.DataFrame(transformed_rows)
-
-def download_nltk_data():
-    """Download required NLTK data"""
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        with st.spinner('Downloading NLTK data...'):
-            nltk.download('punkt', quiet=True)
-
-def verify_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Verify and prepare the dataframe for processing"""
-    # Check for required caption column
-    if 'caption' not in df.columns:
-        st.error("The uploaded file must contain a 'caption' column.")
-        st.stop()
+        # Remove hashtags from main text for sentence splitting
+        main_text = re.sub(r'\s+#\w+(?:\s+#\w+)*\s*$', '', text)
+    else:
+        main_text = text
+        hashtags = ""
     
-    # Check for columns needed for output
-    if 'shortcode' not in df.columns and 'post_id' not in df.columns:
-        st.warning("Neither 'shortcode' nor 'post_id' found. Creating empty 'shortcode' column.")
-        df['shortcode'] = ''
+    # Create pattern from sentence endings
+    pattern = '[' + re.escape(sentence_endings) + ']+'
     
-    if 'post_url' not in df.columns:
-        st.info("Creating 'post_url' column from available data.")
-        if 'shortcode' in df.columns:
-            df['post_url'] = df['shortcode'].apply(lambda x: f"https://www.instagram.com/p/{x}/" if x else '')
-        elif 'post_id' in df.columns:
-            df['post_url'] = df['post_id'].apply(lambda x: f"https://www.instagram.com/p/{x}/" if x else '')
-        else:
-            df['post_url'] = ''
+    # Split sentences on sentence endings
+    sentences = re.split(pattern, main_text)
     
-    return df
+    # Clean and filter sentences
+    result = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if sentence:  # Only add non-empty sentences
+            result.append(sentence + '.')
+    
+    # Add hashtags as final sentence if they exist
+    if hashtags and preserve_hashtags:
+        result.append(hashtags)
+    
+    return result
 
-def main():
-    st.set_page_config(
-        page_title="Instagram Caption Transformation",
-        page_icon="📸",
-        layout="wide"
-    )
+def preprocess_ig_posts(df, id_column, caption_column, settings):
+    """Transform raw Instagram posts to sentence-tokenized format"""
     
-    st.title("📸 Instagram Caption Transformation Tool")
-    st.markdown("Transform Instagram captions into sentence-level data with configurable preprocessing options.")
+    # Initialize output data
+    output_data = []
     
-    # Download NLTK data
-    download_nltk_data()
-    
-    # Sidebar for configuration
-    st.sidebar.header("🔧 Preprocessing Configuration")
-    
-    # Default configuration dictionary
-    default_config = {
-        'remove_emojis': True,
-        'normalize_unicode': True,
-        'remove_urls': True,
-        'remove_emails': True,
-        'remove_hashtags': True,
-        'remove_mentions': True,
-        'replace_newlines': True,
-        'normalize_whitespace': True,
-        'add_period_if_missing': True,
-        'empty_text_replacement': '[PAD]'
-    }
-    
-    # Create configuration interface
-    config = {}
-    
-    st.sidebar.subheader("Text Cleaning Options")
-    config['remove_emojis'] = st.sidebar.checkbox("Remove Emojis", default_config['remove_emojis'])
-    config['normalize_unicode'] = st.sidebar.checkbox("Normalize Unicode Characters", default_config['normalize_unicode'])
-    config['remove_urls'] = st.sidebar.checkbox("Remove URLs", default_config['remove_urls'])
-    config['remove_emails'] = st.sidebar.checkbox("Remove Email Addresses", default_config['remove_emails'])
-    config['remove_hashtags'] = st.sidebar.checkbox("Remove Hashtags", default_config['remove_hashtags'])
-    config['remove_mentions'] = st.sidebar.checkbox("Remove Mentions (@username)", default_config['remove_mentions'])
-    
-    st.sidebar.subheader("Text Formatting Options")
-    config['replace_newlines'] = st.sidebar.checkbox("Replace Newlines with Spaces", default_config['replace_newlines'])
-    config['normalize_whitespace'] = st.sidebar.checkbox("Normalize Whitespace", default_config['normalize_whitespace'])
-    config['add_period_if_missing'] = st.sidebar.checkbox("Add Period if Missing", default_config['add_period_if_missing'])
-    
-    st.sidebar.subheader("Other Options")
-    config['empty_text_replacement'] = st.sidebar.text_input(
-        "Empty Text Replacement", 
-        default_config['empty_text_replacement']
-    )
-    
-    # Reset to defaults button
-    if st.sidebar.button("🔄 Reset to Defaults"):
-        st.rerun()
-    
-    # Main content area
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.header("📂 Upload Dataset")
-        uploaded_file = st.file_uploader(
-            "Choose a CSV file",
-            type=['csv'],
-            help="Upload a CSV file containing Instagram captions. Must have a 'caption' column."
+    for _, row in df.iterrows():
+        post_id = row[id_column]
+        caption = row[caption_column]
+        
+        # Clean the caption
+        cleaned_caption = clean_text(
+            caption, 
+            emoji_removal=settings['remove_emojis'],
+            whitespace_normalization=settings['normalize_whitespace']
         )
         
-        if uploaded_file is not None:
-            try:
-                # Read the uploaded file
-                df = pd.read_csv(uploaded_file)
-                
-                st.success(f"✅ Successfully loaded {len(df)} rows")
-                
-                # Show basic info about the dataset
-                st.subheader("📊 Dataset Information")
-                st.write(f"**Number of rows:** {len(df)}")
-                st.write(f"**Columns:** {', '.join(df.columns.tolist())}")
-                
-                # Show sample data
-                st.subheader("🔍 Sample Data")
-                st.dataframe(df.head(), use_container_width=True)
-                
-                # Verify and prepare dataframe
-                df = verify_dataframe(df)
-                
-            except Exception as e:
-                st.error(f"❌ Error reading file: {str(e)}")
-                st.stop()
-    
-    with col2:
-        st.header("⚙️ Current Configuration")
+        # Tokenize into sentences
+        sentences = tokenize_sentences(
+            cleaned_caption,
+            sentence_endings=settings['sentence_endings'],
+            preserve_hashtags=settings['preserve_hashtags']
+        )
         
-        # Display current configuration
-        config_df = pd.DataFrame([
-            {"Setting": key.replace('_', ' ').title(), "Value": str(value)}
-            for key, value in config.items()
-        ])
-        st.dataframe(config_df, use_container_width=True, hide_index=True)
+        # Create rows for each sentence
+        for i, sentence in enumerate(sentences, 1):
+            output_data.append({
+                'ID': post_id,
+                'Sentence ID': i,
+                'Context': caption,  # Keep original caption as context
+                'Statement': sentence
+            })
     
-    # Processing section
-    if uploaded_file is not None:
-        st.header("🚀 Process Data")
+    # Create output dataframe
+    output_df = pd.DataFrame(output_data)
+    
+    return output_df
+
+# Set page config
+st.set_page_config(page_title="Instagram Posts Preprocessor", page_icon="📱", layout="wide")
+
+# Main app
+st.title("📱 Instagram Posts Preprocessor")
+st.markdown("Transform your Instagram posts dataset into sentence-tokenized format")
+
+# Sidebar for settings
+st.sidebar.header("⚙️ Processing Settings")
+
+# Text cleaning settings
+st.sidebar.subheader("Text Cleaning")
+remove_emojis = st.sidebar.checkbox("Remove emojis", value=True)
+normalize_whitespace = st.sidebar.checkbox("Normalize whitespace", value=True)
+
+# Sentence tokenization settings
+st.sidebar.subheader("Sentence Tokenization")
+sentence_endings = st.sidebar.text_input(
+    "Sentence endings", 
+    value=".!?",
+    help="Characters that mark the end of a sentence"
+)
+preserve_hashtags = st.sidebar.checkbox("Preserve hashtags as separate sentences", value=True)
+
+# Collect settings
+settings = {
+    'remove_emojis': remove_emojis,
+    'normalize_whitespace': normalize_whitespace,
+    'sentence_endings': sentence_endings,
+    'preserve_hashtags': preserve_hashtags
+}
+
+# File upload
+st.header("📁 Upload Your Dataset")
+uploaded_file = st.file_uploader(
+    "Choose a CSV file",
+    type=['csv'],
+    help="Upload your Instagram posts dataset in CSV format"
+)
+
+if uploaded_file is not None:
+    try:
+        # Load the dataset
+        df = pd.read_csv(uploaded_file)
         
-        if st.button("Transform Captions", type="primary", use_container_width=True):
-            with st.spinner("Processing captions..."):
+        st.success(f"✅ Dataset loaded successfully! ({len(df)} rows, {len(df.columns)} columns)")
+        
+        # Show dataset preview
+        with st.expander("📊 Dataset Preview", expanded=True):
+            st.dataframe(df.head())
+        
+        # Column selection
+        st.header("🎯 Column Mapping")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            id_column = st.selectbox(
+                "Select ID column (post identifier)",
+                options=df.columns.tolist(),
+                help="Column containing unique post identifiers"
+            )
+        
+        with col2:
+            caption_column = st.selectbox(
+                "Select Caption column (text content)",
+                options=df.columns.tolist(),
+                help="Column containing the post captions/text"
+            )
+        
+        # Process button
+        if st.button("🚀 Process Dataset", type="primary"):
+            with st.spinner("Processing your dataset..."):
                 try:
-                    # Initialize preprocessor with current config
-                    preprocessor = TextPreprocessor(config)
-                    
-                    # Apply cleaning to captions
-                    df['cleaned_caption'] = df['caption'].apply(
-                        lambda x: preprocessor.clean_text(x)
-                    )
-                    
-                    # Transform to sentence-level data
-                    transformed_df = preprocessor.transform_caption_data(df)
-                    
-                    # Ensure correct column order
-                    output_columns = ['shortcode', 'turn', 'caption', 'transcript', 'post_url']
-                    transformed_df = transformed_df[output_columns]
-                    
-                    st.success(f"✅ Successfully created {len(transformed_df)} sentence-level records from {len(df)} captions")
+                    # Process the data
+                    result_df = preprocess_ig_posts(df, id_column, caption_column, settings)
                     
                     # Display results
-                    st.subheader("📋 Transformation Results")
+                    st.success(f"✅ Processing complete! Transformed {len(df)} posts into {len(result_df)} sentences")
                     
-                    # Show statistics
-                    col1, col2, col3 = st.columns(3)
+                    # Show processed data preview
+                    st.header("📋 Processed Data Preview")
+                    st.dataframe(result_df.head(10))
+                    
+                    # Statistics
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("Original Posts", len(df))
                     with col2:
-                        st.metric("Generated Sentences", len(transformed_df))
+                        st.metric("Total Sentences", len(result_df))
                     with col3:
-                        avg_sentences = len(transformed_df) / len(df) if len(df) > 0 else 0
-                        st.metric("Avg Sentences per Post", f"{avg_sentences:.2f}")
+                        avg_sentences = len(result_df) / len(df) if len(df) > 0 else 0
+                        st.metric("Avg Sentences/Post", f"{avg_sentences:.2f}")
+                    with col4:
+                        unique_posts = result_df['ID'].nunique()
+                        st.metric("Unique Posts", unique_posts)
                     
-                    # Show preview of transformed data
-                    st.subheader("👀 Preview Transformed Data")
-                    st.dataframe(transformed_df.head(10), use_container_width=True)
+                    # Download button
+                    st.header("💾 Download Results")
                     
-                    # Download section
-                    st.subheader("💾 Download Results")
-                    
-                    # Convert to CSV for download
+                    # Convert dataframe to CSV
                     csv_buffer = io.StringIO()
-                    transformed_df.to_csv(
-                        csv_buffer,
-                        index=False,
-                        quoting=csv.QUOTE_NONNUMERIC,
-                        quotechar='"',
-                        escapechar='\\',
-                        encoding='utf-8'
-                    )
+                    result_df.to_csv(csv_buffer, index=False)
                     csv_data = csv_buffer.getvalue()
                     
                     st.download_button(
-                        label="📥 Download Transformed Data as CSV",
+                        label="📥 Download Processed Data as CSV",
                         data=csv_data,
-                        file_name="ig_posts_transformed.csv",
-                        mime="text/csv",
-                        use_container_width=True
+                        file_name="ig_posts_processed.csv",
+                        mime="text/csv"
                     )
                     
-                    # Show some examples of transformations
-                    st.subheader("🔍 Transformation Examples")
+                    # Show sample transformations
+                    st.header("🔍 Sample Transformations")
                     
-                    for i in range(min(3, len(df))):
-                        if not pd.isna(df.iloc[i]['caption']):
-                            with st.expander(f"Example {i+1}"):
-                                st.write("**Original Caption:**")
-                                st.write(df.iloc[i]['caption'][:200] + "..." if len(df.iloc[i]['caption']) > 200 else df.iloc[i]['caption'])
-                                
-                                st.write("**Cleaned Caption:**")
-                                st.write(df.iloc[i]['cleaned_caption'])
-                                
-                                # Show corresponding sentences
-                                post_sentences = transformed_df[
-                                    transformed_df['shortcode'] == df.iloc[i].get('shortcode', df.iloc[i].get('post_id', ''))
-                                ]['transcript'].tolist()
-                                
-                                st.write("**Generated Sentences:**")
-                                for j, sentence in enumerate(post_sentences, 1):
-                                    st.write(f"{j}. {sentence}")
+                    # Get a few examples
+                    sample_posts = df.head(3)
+                    
+                    for idx, row in sample_posts.iterrows():
+                        with st.expander(f"Post {idx + 1}: {row[id_column]}"):
+                            st.subheader("Original Caption:")
+                            st.text(row[caption_column])
+                            
+                            st.subheader("Processed Sentences:")
+                            post_sentences = result_df[result_df['ID'] == row[id_column]]
+                            for _, sentence_row in post_sentences.iterrows():
+                                st.write(f"**Sentence {sentence_row['Sentence ID']}:** {sentence_row['Statement']}")
                     
                 except Exception as e:
-                    st.error(f"❌ Error during processing: {str(e)}")
-                    logger.error(f"Processing error: {str(e)}")
-    
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style='text-align: center; color: #666;'>
-            <p>Instagram Caption Transformation Tool | Based on original work by Dr. Yufan (Frank) Lin</p>
-        </div>
-        """, 
-        unsafe_allow_html=True
-    )
+                    st.error(f"❌ Error processing dataset: {str(e)}")
+                    st.info("Please check your column selections and data format.")
+        
+    except Exception as e:
+        st.error(f"❌ Error loading dataset: {str(e)}")
+        st.info("Please make sure you've uploaded a valid CSV file.")
 
-if __name__ == "__main__":
-    main()
+else:
+    # Show instructions when no file is uploaded
+    st.info("👆 Please upload a CSV file to get started")
+    
+    st.header("📖 How to Use")
+    st.markdown("""
+    1. **Upload your dataset**: Choose a CSV file containing Instagram posts
+    2. **Configure settings**: Use the sidebar to customize text cleaning and tokenization
+    3. **Select columns**: Map your dataset columns to ID and Caption fields
+    4. **Process**: Click the process button to transform your data
+    5. **Download**: Get your processed dataset as a CSV file
+    
+    ### Expected Input Format
+    Your CSV should have at least two columns:
+    - **ID column**: Unique identifier for each post (e.g., 'shortcode', 'post_id')
+    - **Caption column**: The text content of the post (e.g., 'caption', 'text')
+    
+    ### Output Format
+    The processed dataset will have these columns:
+    - **ID**: Original post identifier
+    - **Sentence ID**: Sequential number for each sentence within a post
+    - **Context**: Original caption (for reference)
+    - **Statement**: Individual sentence extracted from the caption
+    """)
