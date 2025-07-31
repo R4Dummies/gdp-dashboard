@@ -40,8 +40,141 @@ def load_custom_css():
         padding: 0.5rem 2rem;
         font-weight: 600;
     }
+    
+    .fireworks {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 9999;
+    }
+    
+    .firework {
+        position: absolute;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        animation: firework 1.5s ease-out forwards;
+    }
+    
+    @keyframes firework {
+        0% {
+            transform: scale(0);
+            opacity: 1;
+        }
+        15% {
+            transform: scale(1);
+        }
+        100% {
+            transform: scale(20);
+            opacity: 0;
+        }
+    }
+    
+    .spark {
+        position: absolute;
+        width: 2px;
+        height: 2px;
+        border-radius: 50%;
+        animation: spark 2s ease-out forwards;
+    }
+    
+    @keyframes spark {
+        0% {
+            transform: translate(0, 0) scale(1);
+            opacity: 1;
+        }
+        100% {
+            transform: translate(var(--dx), var(--dy)) scale(0);
+            opacity: 0;
+        }
+    }
     </style>
     """, unsafe_allow_html=True)
+
+def create_fireworks_effect():
+    """Create a spectacular fireworks animation"""
+    return """
+    <div class="fireworks" id="fireworks-container"></div>
+    <script>
+    function createFirework(x, y) {
+        const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff', '#fd79a8'];
+        const container = document.getElementById('fireworks-container');
+        
+        // Main firework burst
+        const firework = document.createElement('div');
+        firework.className = 'firework';
+        firework.style.left = x + 'px';
+        firework.style.top = y + 'px';
+        firework.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        firework.style.boxShadow = `0 0 20px ${colors[Math.floor(Math.random() * colors.length)]}`;
+        container.appendChild(firework);
+        
+        // Create beautiful sparks
+        for (let i = 0; i < 15; i++) {
+            const spark = document.createElement('div');
+            spark.className = 'spark';
+            spark.style.left = x + 'px';
+            spark.style.top = y + 'px';
+            spark.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+            spark.style.boxShadow = `0 0 10px ${colors[Math.floor(Math.random() * colors.length)]}`;
+            
+            const angle = (i * 24) * Math.PI / 180;
+            const distance = 80 + Math.random() * 60;
+            const dx = Math.cos(angle) * distance;
+            const dy = Math.sin(angle) * distance;
+            
+            spark.style.setProperty('--dx', dx + 'px');
+            spark.style.setProperty('--dy', dy + 'px');
+            
+            container.appendChild(spark);
+            
+            setTimeout(() => {
+                if (spark.parentNode) spark.parentNode.removeChild(spark);
+            }, 2000);
+        }
+        
+        setTimeout(() => {
+            if (firework.parentNode) firework.parentNode.removeChild(firework);
+        }, 1500);
+    }
+    
+    function launchFireworks() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        
+        // Launch multiple fireworks with timing
+        for (let i = 0; i < 6; i++) {
+            setTimeout(() => {
+                const x = Math.random() * (width - 200) + 100;
+                const y = Math.random() * (height * 0.5) + 50;
+                createFirework(x, y);
+            }, i * 300);
+        }
+        
+        // Second wave
+        setTimeout(() => {
+            for (let i = 0; i < 4; i++) {
+                setTimeout(() => {
+                    const x = Math.random() * (width - 200) + 100;
+                    const y = Math.random() * (height * 0.6) + 50;
+                    createFirework(x, y);
+                }, i * 200);
+            }
+        }, 1000);
+        
+        // Clean up
+        setTimeout(() => {
+            const container = document.getElementById('fireworks-container');
+            if (container) container.innerHTML = '';
+        }, 5000);
+    }
+    
+    launchFireworks();
+    </script>
+    """
 
 def advanced_sentence_tokenize(text: str) -> List[str]:
     """
@@ -278,7 +411,8 @@ def main():
                             processing_time = (end_time - start_time).total_seconds()
                             
                             if len(transformed_df) > 0:
-                                st.balloons()
+                                # 🎆 SPECTACULAR FIREWORKS! 🎆
+                                st.components.v1.html(create_fireworks_effect(), height=0)
                                 st.success(f"✅ Completed in {processing_time:.2f} seconds!")
                                 
                                 # Results metrics
