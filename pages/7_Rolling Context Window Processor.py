@@ -1,23 +1,45 @@
 import streamlit as st
 import pandas as pd
-import nltk
 import re
 import logging
-import emoji
 import csv
 from typing import List, Dict
-from unidecode import unidecode
-from nltk.tokenize import sent_tokenize
 import io
-import zipfile
+
+# Try to import optional dependencies
+try:
+    import nltk
+    from nltk.tokenize import sent_tokenize
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
+    sent_tokenize = None
+
+try:
+    from unidecode import unidecode
+    UNIDECODE_AVAILABLE = True
+except ImportError:
+    UNIDECODE_AVAILABLE = False
+    unidecode = None
+
+try:
+    import emoji
+    EMOJI_AVAILABLE = True
+except ImportError:
+    EMOJI_AVAILABLE = False
+    emoji = None
 
 # Download required NLTK data (only once)
 @st.cache_resource
 def download_nltk_data():
-    try:
-        nltk.download('punkt', quiet=True)
-    except Exception as e:
-        st.error(f"Error downloading NLTK data: {e}")
+    if NLTK_AVAILABLE:
+        try:
+            nltk.download('punkt', quiet=True)
+            return True
+        except Exception as e:
+            st.error(f"Error downloading NLTK data: {e}")
+            return False
+    return False
 
 # Configure logging
 logging.basicConfig(
@@ -44,7 +66,31 @@ class TextPreprocessor:
 
     def remove_emoji(self, text: str) -> str:
         """Remove emoji characters from text"""
-        return emoji.replace_emoji(text, replace='')
+        if EMOJI_AVAILABLE:
+            return emoji.replace_emoji(text, replace='')
+        else:
+            # Fallback: Remove common emoji ranges using regex
+            emoji_pattern = re.compile("["
+                u"\U0001F600-\U0001F64F"  # emoticons
+                u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                u"\U00002500-\U00002BEF"  # chinese char
+                u"\U00002702-\U000027B0"
+                u"\U00002702-\U000027B0"
+                u"\U000024C2-\U0001F251"
+                u"\U0001f926-\U0001f937"
+                u"\U00010000-\U0010ffff"
+                u"\u2640-\u2642" 
+                u"\u2600-\u2B55"
+                u"\u200d"
+                u"\u23cf"
+                u"\u23e9"
+                u"\u231a"
+                u"\ufe0f"  # dingbats
+                u"\u3030"
+                "]+", flags=re.UNICODE)
+            return emoji_pattern.sub(r'', text)
 
     def clean_text(self, text: str, cleaning_options: Dict) -> str:
         """Clean and normalize Instagram caption text"""
@@ -56,8 +102,11 @@ class TextPreprocessor:
                 text = self.remove_emoji(text)
 
             # Normalize text with unidecode if option is enabled
-            if cleaning_options.get('normalize_unicode', True):
+            if cleaning_options.get('normalize_unicode', True) and UNIDECODE_AVAILABLE:
                 text = unidecode(text)
+            elif cleaning_options.get('normalize_unicode', True):
+                # Fallback: Basic ASCII conversion
+                text = text.encode('ascii', 'ignore').decode('ascii')
 
             # Remove URLs if option is enabled
             if cleaning_options.get('remove_urls', True):
@@ -92,13 +141,19 @@ class TextPreprocessor:
             return "[PAD]"
 
     def split_sentences(self, caption: str) -> List[str]:
-        """Split caption text into sentences using NLTK"""
+        """Split caption text into sentences using NLTK or fallback method"""
         try:
             # Handle Instagram captions that might not end with proper punctuation
             if caption and not caption[-1] in '.!?':
                 caption = caption + '.'
 
-            sentences = sent_tokenize(caption)
+            if NLTK_AVAILABLE and sent_tokenize:
+                sentences = sent_tokenize(caption)
+            else:
+                # Fallback: Simple sentence splitting using regex
+                sentences = re.split(r'[.!?]+', caption)
+                sentences = [s.strip() + '.' for s in sentences if s.strip()]
+            
             # Filter out empty sentences
             return [sent.strip() for sent in sentences if sent.strip()]
         except Exception as e:
@@ -139,8 +194,23 @@ def main():
     st.title("📱 Instagram Caption Transformation Tool")
     st.markdown("Transform Instagram caption data into sentence-level records with customizable cleaning options.")
     
-    # Download NLTK data
-    download_nltk_data()
+    # Check for missing dependencies and show warnings
+    missing_deps = []
+    if not NLTK_AVAILABLE:
+        missing_deps.append("nltk")
+    if not UNIDECODE_AVAILABLE:
+        missing_deps.append("unidecode")
+    if not EMOJI_AVAILABLE:
+        missing_deps.append("emoji")
+    
+    if missing_deps:
+        st.warning(f"⚠️ Optional dependencies not found: {', '.join(missing_deps)}. "
+                   f"The app will use fallback methods. For full functionality, install with: "
+                   f"`pip install {' '.join(missing_deps)}`")
+    
+    # Download NLTK data if available
+    if NLTK_AVAILABLE:
+        download_nltk_data()
     
     # Sidebar for configuration
     st.sidebar.header("⚙️ Configuration")
@@ -209,8 +279,12 @@ def main():
             st.sidebar.subheader("🧹 Text Cleaning Options")
             
             cleaning_options = {
-                'remove_emojis': st.sidebar.checkbox("Remove Emojis", value=True),
-                'normalize_unicode': st.sidebar.checkbox("Normalize Unicode", value=True),
+                'remove_emojis': st.sidebar.checkbox("Remove Emojis", value=True, 
+                                                   help="Remove emoji characters" + 
+                                                   ("" if EMOJI_AVAILABLE else " (using fallback method)")),
+                'normalize_unicode': st.sidebar.checkbox("Normalize Unicode", value=True,
+                                                        help="Convert non-ASCII characters" + 
+                                                        ("" if UNIDECODE_AVAILABLE else " (using basic ASCII conversion)")),
                 'remove_urls': st.sidebar.checkbox("Remove URLs", value=True),
                 'remove_emails': st.sidebar.checkbox("Remove Email Addresses", value=True),
                 'remove_hashtags': st.sidebar.checkbox("Remove Hashtags", value=True),
@@ -315,20 +389,23 @@ def main():
                             )
                         
                         with col2:
-                            # Create Excel file
-                            excel_buffer = io.BytesIO()
-                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                transformed_df.to_excel(writer, index=False, sheet_name='Transformed_Data')
-                                df[['cleaned_caption'] + [caption_col]].to_excel(
-                                    writer, index=False, sheet_name='Cleaning_Preview'
+                            # Create Excel file if openpyxl is available
+                            try:
+                                excel_buffer = io.BytesIO()
+                                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                    transformed_df.to_excel(writer, index=False, sheet_name='Transformed_Data')
+                                    df[['cleaned_caption'] + [caption_col]].to_excel(
+                                        writer, index=False, sheet_name='Cleaning_Preview'
+                                    )
+                                
+                                st.download_button(
+                                    label="📊 Download Excel",
+                                    data=excel_buffer.getvalue(),
+                                    file_name="ig_posts_transformed.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
-                            
-                            st.download_button(
-                                label="📊 Download Excel",
-                                data=excel_buffer.getvalue(),
-                                file_name="ig_posts_transformed.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
+                            except ImportError:
+                                st.info("Install openpyxl for Excel export: `pip install openpyxl`")
                         
                         # Show cleaning examples
                         if st.checkbox("Show cleaning examples"):
