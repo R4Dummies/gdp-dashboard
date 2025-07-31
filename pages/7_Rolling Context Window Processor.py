@@ -205,8 +205,10 @@ def main():
     
     if missing_deps:
         st.warning(f"⚠️ Optional dependencies not found: {', '.join(missing_deps)}. "
-                   f"The app will use fallback methods. For full functionality, install with: "
-                   f"`pip install {' '.join(missing_deps)}`")
+                   f"The app will use fallback methods. For full functionality, run this command:")
+        st.code(f"pip install {' '.join(missing_deps)}", language="bash")
+        st.info("After installing these packages, restart the Streamlit app:")
+        st.code("streamlit run app.py", language="bash")
     
     # Download NLTK data if available
     if NLTK_AVAILABLE:
