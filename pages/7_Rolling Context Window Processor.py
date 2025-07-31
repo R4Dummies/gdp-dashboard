@@ -65,7 +65,7 @@ def tokenize_sentences(text, sentence_endings='.!?', preserve_hashtags=True):
     
     return result
 
-def preprocess_data(df, id_column, speaker_column, turn_column, transcript_column, post_url_column, settings):
+def preprocess_data(df, id_column, speaker_column, turn_column, transcript_column, settings):
     """Transform raw conversation data to sentence-tokenized format"""
     
     # Initialize output data
@@ -76,7 +76,6 @@ def preprocess_data(df, id_column, speaker_column, turn_column, transcript_colum
         speaker = row[speaker_column]
         turn = row[turn_column]
         transcript_text = row[transcript_column]
-        post_url = row[post_url_column]
         
         # Clean the transcript
         cleaned_transcript = clean_text(
@@ -99,7 +98,7 @@ def preprocess_data(df, id_column, speaker_column, turn_column, transcript_colum
                 'turn': turn,
                 'caption': transcript_text,  # Original transcript as caption
                 'transcript': sentence,      # Individual sentence as transcript
-                'post_url': post_url        # Post URL from dataset
+                'post_url': ''              # Empty post_url column (available for output)
             })
     
     # Create output dataframe
@@ -175,12 +174,6 @@ if uploaded_file is not None:
                 "Turn Column",
                 options=df.columns.tolist(),
                 help="Column indicating the turn number or sequence"
-            )
-            
-            post_url_column = st.selectbox(
-                "Post URL Column",
-                options=df.columns.tolist(),
-                help="Column containing the post URL or link"
             )
         
         with col2:
@@ -290,5 +283,5 @@ else:
     - **turn**: Turn number/sequence
     - **caption**: Original transcript text (for reference)
     - **transcript**: Individual sentence extracted from the original transcript
-    - **post_url**: Empty column (for compatibility)
+    - **post_url**: Empty column (available for future use)
     """)
