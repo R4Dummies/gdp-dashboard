@@ -137,34 +137,29 @@ def main():
             st.markdown("---")
             st.subheader("⚙️ Configuration")
             
-            col1, col2, col3 = st.columns([2, 2, 1])
+            # Single column layout for clean appearance
+            st.markdown("**🎯 Column Mapping**")
             
-            with col1:
-                st.markdown("**🎯 Column Mapping**")
-                columns = list(df.columns)
-                
-                id_column = st.selectbox(
-                    "Select ID Column",
-                    options=columns,
-                    help="Choose the column that contains unique identifiers for your records",
-                    key="id_col"
-                )
+            columns = list(df.columns)
             
-            with col2:
-                context_column = st.selectbox(
-                    "Select Context Column", 
-                    options=columns,
-                    help="Choose the column that contains the text to be transformed into sentences",
-                    key="context_col"
-                )
+            id_column = st.selectbox(
+                "Select ID Column",
+                options=columns,
+                help="Choose the column that contains unique identifiers for your records"
+            )
             
-            with col3:
-                st.markdown("**⚡ Options**")
-                include_hashtags = st.checkbox(
-                    "Include hashtags as separate sentences",
-                    value=True,
-                    help="If checked, hashtags will be extracted and added as separate sentences"
-                )
+            context_column = st.selectbox(
+                "Select Context Column", 
+                options=columns,
+                help="Choose the column that contains the text to be transformed into sentences"
+            )
+            
+            st.markdown("**⚡ Options**")
+            include_hashtags = st.checkbox(
+                "Include hashtags as separate sentences",
+                value=True,
+                help="If checked, hashtags will be extracted and added as separate sentences"
+            )
             
             # Transform button in main area
             st.markdown("---")
