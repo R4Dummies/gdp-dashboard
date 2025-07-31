@@ -1,34 +1,34 @@
 """
-Instagram Data Transformation Streamlit App
-Allows users to upload datasets and transform them into sentence-level data
+Text Transformation Streamlit App
+Transform text data into sentence-level format (No external dependencies)
 """
 
 import streamlit as st
 import pandas as pd
-import nltk
 import re
 import io
 from typing import List
 
-# Download required NLTK data and setup sentence tokenizer
-@st.cache_resource
-def setup_sentence_tokenizer():
-    try:
-        import nltk
-        # Try to download NLTK data
-        nltk.download('punkt_tab', quiet=True)
-        nltk.download('punkt', quiet=True)
-        from nltk.tokenize import sent_tokenize
-        # Test if it works
-        sent_tokenize("Test sentence.")
-        return sent_tokenize
-    except:
-        # Fallback sentence tokenizer if NLTK fails
-        def sent_tokenize(text):
-            # Simple sentence splitting based on punctuation
-            sentences = re.split(r'[.!?]+', text)
-            return [s.strip() for s in sentences if s.strip()]
-        return sent_tokenize
+def simple_sentence_tokenize(text):
+    """Simple sentence tokenizer without external dependencies"""
+    if not text:
+        return []
+    
+    # Add period if text doesn't end with punctuation
+    if text[-1] not in '.!?':
+        text = text + '.'
+    
+    # Split on sentence endings, but be smart about abbreviations
+    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    
+    # Clean up sentences
+    cleaned_sentences = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if sentence and len(sentence) > 2:  # Ignore very short fragments
+            cleaned_sentences.append(sentence)
+    
+    return cleaned_sentences
 
 def extract_hashtags(text):
     """Extract hashtags from text and return them as a single string"""
@@ -67,22 +67,8 @@ def is_punctuation_only(text):
     # Check if text contains only punctuation marks (no letters, numbers, or other meaningful characters)
     return bool(re.match(r'^[^\w#@]+$', cleaned))
 
-def split_into_sentences(text, sent_tokenize):
-    """Split text into sentences using NLTK or fallback tokenizer"""
-    if not text:
-        return []
-    
-    # Add period if text doesn't end with punctuation
-    if text[-1] not in '.!?':
-        text = text + '.'
-    
-    sentences = sent_tokenize(text)
-    # Filter out empty sentences and punctuation-only sentences
-    return [sent.strip() for sent in sentences if sent.strip() and not is_punctuation_only(sent.strip())]
-
 def transform_data(df, id_column, context_column, include_hashtags=True):
     """Transform dataframe into sentence-level data"""
-    sent_tokenize = setup_sentence_tokenizer()
     transformed_rows = []
     
     for _, row in df.iterrows():
@@ -99,7 +85,7 @@ def transform_data(df, id_column, context_column, include_hashtags=True):
         hashtags = extract_hashtags(context) if include_hashtags else ""
         
         # Split into sentences
-        sentences = split_into_sentences(cleaned_context, sent_tokenize)
+        sentences = simple_sentence_tokenize(cleaned_context)
         
         # Add hashtags as a separate sentence if they exist and contain actual content
         if hashtags and not is_punctuation_only(hashtags):
@@ -125,6 +111,9 @@ def main():
     
     st.title("📝 Text Transformation App")
     st.markdown("Transform your text data into sentence-level analysis format")
+    
+    # Add info about no dependencies
+    st.info("✅ This app works without any external NLP libraries!")
     
     # Sidebar for configuration
     st.sidebar.header("Configuration")
@@ -182,7 +171,7 @@ def main():
                             transformed_df = transform_data(df, id_column, context_column, include_hashtags)
                             
                             if len(transformed_df) > 0:
-                                st.balloons()
+                                st.balloons()  # 🎈 Original balloon effect!
                                 st.success(f"Transformation complete! Generated {len(transformed_df)} sentences from {len(df)} records.")
                                 
                                 # Show results
