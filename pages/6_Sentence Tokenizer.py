@@ -5,7 +5,6 @@ Transform your text data into sentence-level analysis format with style!
 
 import streamlit as st
 import pandas as pd
-import nltk
 import re
 import io
 import plotly.express as px
@@ -78,25 +77,43 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Download required NLTK data and setup sentence tokenizer
+# Smart sentence tokenizer without NLTK dependency
 @st.cache_resource
 def setup_sentence_tokenizer():
-    try:
-        import nltk
-        # Try to download NLTK data
-        nltk.download('punkt_tab', quiet=True)
-        nltk.download('punkt', quiet=True)
-        from nltk.tokenize import sent_tokenize
-        # Test if it works
-        sent_tokenize("Test sentence.")
-        return sent_tokenize
-    except:
-        # Fallback sentence tokenizer if NLTK fails
-        def sent_tokenize(text):
-            # Simple sentence splitting based on punctuation
-            sentences = re.split(r'[.!?]+', text)
-            return [s.strip() for s in sentences if s.strip()]
-        return sent_tokenize
+    """Advanced sentence tokenizer using regex patterns"""
+    def smart_sent_tokenize(text):
+        if not text:
+            return []
+        
+        # Handle common abbreviations that shouldn't split sentences
+        abbreviations = ['Mr.', 'Mrs.', 'Dr.', 'Prof.', 'Sr.', 'Jr.', 'vs.', 'etc.', 'i.e.', 'e.g.']
+        
+        # Replace abbreviations with placeholders
+        protected_text = text
+        placeholders = {}
+        for i, abbrev in enumerate(abbreviations):
+            placeholder = f"__ABBREV_{i}__"
+            protected_text = protected_text.replace(abbrev, placeholder)
+            placeholders[placeholder] = abbrev
+        
+        # Split on sentence-ending punctuation followed by whitespace and capital letter or end of string
+        sentence_pattern = r'[.!?]+(?=\s+[A-Z]|$)'
+        sentences = re.split(sentence_pattern, protected_text)
+        
+        # Restore abbreviations and clean up
+        cleaned_sentences = []
+        for sentence in sentences:
+            # Restore abbreviations
+            for placeholder, abbrev in placeholders.items():
+                sentence = sentence.replace(placeholder, abbrev)
+            
+            sentence = sentence.strip()
+            if sentence:
+                cleaned_sentences.append(sentence)
+        
+        return cleaned_sentences
+    
+    return smart_sent_tokenize
 
 def extract_hashtags(text):
     """Extract hashtags from text and return them as a single string"""
@@ -135,8 +152,13 @@ def is_punctuation_only(text):
     # Check if text contains only punctuation marks (no letters, numbers, or other meaningful characters)
     return bool(re.match(r'^[^\w#@]+$', cleaned))
 
-def split_into_sentences(text, sent_tokenize):
-    """Split text into sentences using NLTK or fallback tokenizer"""
+def split_into_sentences(text, sent_tokenize_func):
+    """Split text into sentences using smart tokenizer"""
+    if not text:
+        return []
+    
+    # Clean and prepare text
+    text = text.strip()
     if not text:
         return []
     
@@ -144,13 +166,13 @@ def split_into_sentences(text, sent_tokenize):
     if text[-1] not in '.!?':
         text = text + '.'
     
-    sentences = sent_tokenize(text)
+    sentences = sent_tokenize_func(text)
     # Filter out empty sentences and punctuation-only sentences
     return [sent.strip() for sent in sentences if sent.strip() and not is_punctuation_only(sent.strip())]
 
 def transform_data(df, id_column, context_column, include_hashtags=True, progress_bar=None):
     """Transform dataframe into sentence-level data"""
-    sent_tokenize = setup_sentence_tokenizer()
+    sent_tokenize_func = setup_sentence_tokenizer()
     transformed_rows = []
     total_rows = len(df)
     
@@ -171,7 +193,7 @@ def transform_data(df, id_column, context_column, include_hashtags=True, progres
         hashtags = extract_hashtags(context) if include_hashtags else ""
         
         # Split into sentences
-        sentences = split_into_sentences(cleaned_context, sent_tokenize)
+        sentences = split_into_sentences(cleaned_context, sent_tokenize_func)
         
         # Add hashtags as a separate sentence if they exist and contain actual content
         if hashtags and not is_punctuation_only(hashtags):
