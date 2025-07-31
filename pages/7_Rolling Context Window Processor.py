@@ -186,13 +186,13 @@ class TextPreprocessor:
 
 def main():
     st.set_page_config(
-        page_title="Instagram Caption Transformation Tool",
-        page_icon="📱",
+        page_title="Conversation Data Processing Tool",
+        page_icon="📞",
         layout="wide"
     )
     
-    st.title("📱 Instagram Caption Transformation Tool")
-    st.markdown("Transform Instagram caption data into sentence-level records with customizable cleaning options.")
+    st.title("📞 Conversation Data Processing Tool")
+    st.markdown("Process and clean conversation/call transcript data with customizable text cleaning options.")
     
     # Check for missing dependencies and show warnings
     missing_deps = []
@@ -221,7 +221,7 @@ def main():
     uploaded_file = st.file_uploader(
         "Upload your CSV file",
         type=['csv'],
-        help="Upload a CSV file containing Instagram caption data"
+        help="Upload a CSV file containing conversation/call data"
     )
     
     if uploaded_file is not None:
@@ -249,32 +249,38 @@ def main():
             
             # Column mapping section
             st.subheader("🔗 Column Mapping")
-            st.write("Map your CSV columns to the required fields:")
+            st.write("Map your CSV columns to the required fields (auto-detected defaults shown):")
             
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             
             with col1:
-                caption_col = st.selectbox(
-                    "Caption Column*",
+                id_col = st.selectbox(
+                    "ID Column (Call/Conversation ID)",
                     options=df.columns.tolist(),
-                    index=0 if 'caption' not in df.columns else df.columns.tolist().index('caption'),
-                    help="Select the column containing Instagram captions"
+                    index=0 if 'Call_ID' not in df.columns else df.columns.tolist().index('Call_ID'),
+                    help="Select the column containing call or conversation IDs"
+                )
+                
+                turn_col = st.selectbox(
+                    "Turn Column",
+                    options=df.columns.tolist(),
+                    index=0 if 'Turn' not in df.columns else df.columns.tolist().index('Turn'),
+                    help="Select the column containing turn numbers"
                 )
             
             with col2:
-                shortcode_col = st.selectbox(
-                    "Shortcode/Post ID Column",
-                    options=['None'] + df.columns.tolist(),
-                    index=0 if 'shortcode' not in df.columns else df.columns.tolist().index('shortcode') + 1,
-                    help="Select the column containing post shortcodes or IDs"
+                speaker_col = st.selectbox(
+                    "Speaker Column",
+                    options=df.columns.tolist(),
+                    index=0 if 'Speaker' not in df.columns else df.columns.tolist().index('Speaker'),
+                    help="Select the column containing speaker information"
                 )
-            
-            with col3:
-                post_url_col = st.selectbox(
-                    "Post URL Column",
-                    options=['None'] + df.columns.tolist(),
-                    index=0 if 'post_url' not in df.columns else df.columns.tolist().index('post_url') + 1,
-                    help="Select the column containing post URLs (optional)"
+                
+                transcript_col = st.selectbox(
+                    "Statement/Transcript Column",
+                    options=df.columns.tolist(),
+                    index=0 if 'Transcript' not in df.columns else df.columns.tolist().index('Transcript'),
+                    help="Select the column containing the text/transcript to process"
                 )
             
             # Cleaning options
@@ -320,46 +326,50 @@ def main():
                     try:
                         # Create column mapping
                         column_mapping = {
-                            'caption': caption_col,
-                            'shortcode': shortcode_col if shortcode_col != 'None' else None,
-                            'post_url': post_url_col if post_url_col != 'None' else None
+                            'id': id_col,
+                            'turn': turn_col,
+                            'speaker': speaker_col,
+                            'transcript': transcript_col
                         }
                         
                         # Initialize preprocessor
                         preprocessor = TextPreprocessor(custom_patterns)
                         
-                        # Clean captions
-                        df['cleaned_caption'] = df[caption_col].apply(
+                        # Clean transcripts
+                        df['cleaned_transcript'] = df[transcript_col].apply(
                             lambda x: preprocessor.clean_text(x, cleaning_options)
                         )
                         
-                        # Handle missing columns
-                        if shortcode_col == 'None':
-                            df['shortcode'] = ''
+                        # Transform data - for conversation data, we'll just clean the text
+                        # and keep the original structure with cleaned transcript
+                        transformed_df = df.copy()
                         
-                        if post_url_col == 'None':
-                            if shortcode_col != 'None':
-                                df['post_url'] = df[shortcode_col].apply(
-                                    lambda x: f"https://www.instagram.com/p/{x}/" if x else ''
-                                )
-                            else:
-                                df['post_url'] = ''
+                        # Rename columns to match expected output format
+                        transformed_df = transformed_df.rename(columns={
+                            id_col: 'call_id',
+                            turn_col: 'turn',
+                            speaker_col: 'speaker', 
+                            transcript_col: 'original_transcript'
+                        })
                         
-                        # Transform data
-                        transformed_df = preprocessor.transform_caption_data(df, column_mapping)
+                        # Add cleaned transcript
+                        transformed_df['cleaned_transcript'] = df['cleaned_transcript']
+                        
+                        # Select only the required columns
+                        output_columns = ['call_id', 'turn', 'speaker', 'original_transcript', 'cleaned_transcript']
+                        transformed_df = transformed_df[output_columns]
                         
                         # Display results
-                        st.success(f"✅ Successfully transformed {len(df)} captions into {len(transformed_df)} sentence-level records")
+                        st.success(f"✅ Successfully processed {len(df)} conversation records")
                         
                         # Show transformation statistics
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("Original Records", len(df))
+                            st.metric("Total Records", len(df))
                         with col2:
-                            st.metric("Transformed Records", len(transformed_df))
+                            st.metric("Speakers", df[speaker_col].nunique())
                         with col3:
-                            avg_sentences = len(transformed_df) / len(df) if len(df) > 0 else 0
-                            st.metric("Avg Sentences/Caption", f"{avg_sentences:.2f}")
+                            st.metric("Conversations", df[id_col].nunique())
                         
                         # Preview transformed data
                         st.subheader("📋 Transformed Data Preview")
@@ -386,7 +396,7 @@ def main():
                             st.download_button(
                                 label="📄 Download CSV",
                                 data=csv_data,
-                                file_name="ig_posts_transformed.csv",
+                                file_name="conversation_data_processed.csv",
                                 mime="text/csv"
                             )
                         
@@ -395,15 +405,15 @@ def main():
                             try:
                                 excel_buffer = io.BytesIO()
                                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                    transformed_df.to_excel(writer, index=False, sheet_name='Transformed_Data')
-                                    df[['cleaned_caption'] + [caption_col]].to_excel(
+                                    transformed_df.to_excel(writer, index=False, sheet_name='Processed_Data')
+                                    df[[transcript_col, 'cleaned_transcript']].to_excel(
                                         writer, index=False, sheet_name='Cleaning_Preview'
                                     )
                                 
                                 st.download_button(
                                     label="📊 Download Excel",
                                     data=excel_buffer.getvalue(),
-                                    file_name="ig_posts_transformed.xlsx",
+                                    file_name="conversation_data_processed.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
                             except ImportError:
@@ -412,8 +422,8 @@ def main():
                         # Show cleaning examples
                         if st.checkbox("Show cleaning examples"):
                             st.subheader("🔍 Text Cleaning Examples")
-                            example_df = df[[caption_col, 'cleaned_caption']].head(5)
-                            example_df.columns = ['Original Caption', 'Cleaned Caption']
+                            example_df = df[[transcript_col, 'cleaned_transcript']].head(5)
+                            example_df.columns = ['Original Transcript', 'Cleaned Transcript']
                             st.dataframe(example_df, use_container_width=True)
                         
                     except Exception as e:
@@ -428,19 +438,17 @@ def main():
         st.info("👆 Please upload a CSV file to get started")
         
         st.subheader("📋 Expected CSV Format")
-        st.write("Your CSV file should contain at least one column with Instagram captions. Optional columns include:")
+        st.write("Your CSV file should contain conversation/call data with these columns:")
         
         example_data = pd.DataFrame({
-            'caption': [
-                'Amazing sunset today! 🌅 #beautiful #nature',
-                'Check out our new product @instagram 💪',
-                'Love this place! Visit https://example.com for more info'
-            ],
-            'shortcode': ['ABC123', 'DEF456', 'GHI789'],
-            'post_url': [
-                'https://www.instagram.com/p/ABC123/',
-                'https://www.instagram.com/p/DEF456/',
-                'https://www.instagram.com/p/GHI789/'
+            'Call_ID': ['CALL_001', 'CALL_001', 'CALL_002', 'CALL_002'],
+            'Turn': [1, 2, 1, 2],
+            'Speaker': ['Agent', 'Customer', 'Agent', 'Customer'],
+            'Transcript': [
+                'Hello, how can I help you today? 😊',
+                'Hi! I need help with my account @support',
+                'Thank you for calling! Visit https://help.com',
+                'Great, that worked perfectly! #solved'
             ]
         })
         
