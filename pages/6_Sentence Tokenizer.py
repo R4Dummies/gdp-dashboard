@@ -115,10 +115,7 @@ def main():
     # Add info about no dependencies
     st.info("✅ This app works without any external NLP libraries!")
     
-    # Sidebar for configuration
-    st.sidebar.header("Configuration")
-    
-    # File upload
+    # File upload in main area
     uploaded_file = st.file_uploader(
         "Upload your CSV file",
         type=['csv'],
@@ -133,36 +130,45 @@ def main():
             st.success(f"File uploaded successfully! Found {len(df)} rows and {len(df.columns)} columns.")
             
             # Show preview of data
-            st.subheader("Data Preview")
+            st.subheader("📊 Data Preview")
             st.dataframe(df.head(), use_container_width=True)
             
-            # Column selection
-            st.sidebar.subheader("Column Mapping")
+            # Configuration section in main area
+            st.markdown("---")
+            st.subheader("⚙️ Configuration")
             
-            columns = list(df.columns)
+            col1, col2, col3 = st.columns([2, 2, 1])
             
-            id_column = st.sidebar.selectbox(
-                "Select ID Column",
-                options=columns,
-                help="Choose the column that contains unique identifiers for your records"
-            )
+            with col1:
+                st.markdown("**🎯 Column Mapping**")
+                columns = list(df.columns)
+                
+                id_column = st.selectbox(
+                    "Select ID Column",
+                    options=columns,
+                    help="Choose the column that contains unique identifiers for your records",
+                    key="id_col"
+                )
             
-            context_column = st.sidebar.selectbox(
-                "Select Context Column", 
-                options=columns,
-                help="Choose the column that contains the text to be transformed into sentences"
-            )
+            with col2:
+                context_column = st.selectbox(
+                    "Select Context Column", 
+                    options=columns,
+                    help="Choose the column that contains the text to be transformed into sentences",
+                    key="context_col"
+                )
             
-            # Options
-            st.sidebar.subheader("Options")
-            include_hashtags = st.sidebar.checkbox(
-                "Include hashtags as separate sentences",
-                value=True,
-                help="If checked, hashtags will be extracted and added as separate sentences"
-            )
+            with col3:
+                st.markdown("**⚡ Options**")
+                include_hashtags = st.checkbox(
+                    "Include hashtags as separate sentences",
+                    value=True,
+                    help="If checked, hashtags will be extracted and added as separate sentences"
+                )
             
-            # Transform button
-            if st.sidebar.button("Transform Data", type="primary"):
+            # Transform button in main area
+            st.markdown("---")
+            if st.button("🚀 Transform Data", type="primary", use_container_width=True):
                 if id_column == context_column:
                     st.error("ID and Context columns must be different!")
                 else:
@@ -175,7 +181,8 @@ def main():
                                 st.success(f"Transformation complete! Generated {len(transformed_df)} sentences from {len(df)} records.")
                                 
                                 # Show results
-                                st.subheader("Transformation Results")
+                                st.markdown("---")
+                                st.subheader("📈 Transformation Results")
                                 st.dataframe(transformed_df.head(20), use_container_width=True)
                                 
                                 # Statistics
@@ -208,7 +215,8 @@ def main():
                             st.error(f"Error during transformation: {str(e)}")
             
             # Show column info
-            st.subheader("Column Information")
+            st.markdown("---")
+            st.subheader("📋 Column Information")
             col_info = []
             for col in df.columns:
                 col_info.append({
