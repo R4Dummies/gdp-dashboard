@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -109,6 +107,22 @@ def classify_statements(df, text_column, dictionary, ground_truth_column=None):
     
     return results
 
+def calculate_metrics_manually(y_true, y_pred):
+    """Calculate precision, recall, f1, and accuracy manually"""
+    # Calculate confusion matrix components
+    tp = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 1)
+    fp = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 1)
+    fn = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 0)
+    tn = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 0)
+    
+    # Calculate metrics
+    accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    
+    return accuracy, precision, recall, f1, tp, fp, fn, tn
+
 def calculate_overall_metrics(results):
     """Calculate overall classification metrics"""
     if not any('ground_truth' in r for r in results):
@@ -117,17 +131,13 @@ def calculate_overall_metrics(results):
     y_true = [r['ground_truth'] for r in results if 'ground_truth' in r]
     y_pred = [r['predicted'] for r in results if 'ground_truth' in r]
     
-    # Calculate confusion matrix manually
-    tp = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 1)
-    fp = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 1)
-    fn = sum(1 for t, p in zip(y_true, y_pred) if t == 1 and p == 0)
-    tn = sum(1 for t, p in zip(y_true, y_pred) if t == 0 and p == 0)
+    accuracy, precision, recall, f1, tp, fp, fn, tn = calculate_metrics_manually(y_true, y_pred)
     
     metrics = {
-        'accuracy': accuracy_score(y_true, y_pred) * 100,
-        'precision': precision_score(y_true, y_pred, zero_division=0) * 100,
-        'recall': recall_score(y_true, y_pred, zero_division=0) * 100,
-        'f1_score': f1_score(y_true, y_pred, zero_division=0) * 100,
+        'accuracy': accuracy * 100,
+        'precision': precision * 100,
+        'recall': recall * 100,
+        'f1_score': f1 * 100,
         'true_positives': int(tp),
         'false_positives': int(fp),
         'false_negatives': int(fn),
