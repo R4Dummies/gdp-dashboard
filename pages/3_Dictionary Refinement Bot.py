@@ -191,53 +191,27 @@ def analyze_keywords(df, text_column, dictionary, ground_truth_column):
     }
 
 def create_metrics_chart(metrics):
-    """Create a metrics visualization"""
-    fig = go.Figure()
+    """Create a simple metrics visualization using Streamlit"""
+    # Using Streamlit's built-in chart instead of Plotly
+    chart_data = pd.DataFrame({
+        'Metric': ['Accuracy', 'Precision', 'Recall', 'F1 Score'],
+        'Value': [metrics['accuracy'], metrics['precision'], metrics['recall'], metrics['f1_score']]
+    })
     
-    categories = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
-    values = [metrics['accuracy'], metrics['precision'], metrics['recall'], metrics['f1_score']]
-    colors = ['#22c55e', '#f59e0b', '#10b981', '#8b5cf6']
-    
-    fig.add_trace(go.Bar(
-        x=categories,
-        y=values,
-        marker_color=colors,
-        text=[f'{v:.1f}%' for v in values],
-        textposition='auto',
-    ))
-    
-    fig.update_layout(
-        title="Classification Metrics",
-        yaxis_title="Percentage",
-        showlegend=False,
-        height=400
-    )
-    
-    return fig
+    st.bar_chart(chart_data.set_index('Metric'))
+    return None
 
 def create_confusion_matrix_chart(metrics):
-    """Create confusion matrix visualization"""
-    confusion_data = [
-        [metrics['true_negatives'], metrics['false_positives']],
-        [metrics['false_negatives'], metrics['true_positives']]
-    ]
+    """Create confusion matrix visualization using Streamlit"""
+    # Create a simple table representation
+    confusion_df = pd.DataFrame({
+        'Predicted Negative': [metrics['true_negatives'], metrics['false_negatives']],
+        'Predicted Positive': [metrics['false_positives'], metrics['true_positives']]
+    }, index=['Actual Negative', 'Actual Positive'])
     
-    fig = go.Figure(data=go.Heatmap(
-        z=confusion_data,
-        x=['Predicted Negative', 'Predicted Positive'],
-        y=['Actual Negative', 'Actual Positive'],
-        text=confusion_data,
-        texttemplate='%{text}',
-        textfont={"size": 16},
-        colorscale='RdYlGn'
-    ))
-    
-    fig.update_layout(
-        title="Confusion Matrix",
-        height=400
-    )
-    
-    return fig
+    st.write("**Confusion Matrix:**")
+    st.dataframe(confusion_df)
+    return None
 
 def main():
     # Main header
@@ -417,15 +391,23 @@ def main():
             st.subheader("📊 Classification Results")
             
             # Create results dataframe
-            results_df = pd.DataFrame([
-                {
-                    'Statement': r['statement'][:100] + ('...' if len(r['statement']) > 100 else ''),
+            results_data = []
+            for r in st.session_state.classification_results:
+                statement = r['statement']
+                # Truncate long statements
+                if len(statement) > 100:
+                    display_statement = statement[:100] + '...'
+                else:
+                    display_statement = statement
+                
+                results_data.append({
+                    'Statement': display_statement,
                     'Predicted': '✅ Positive' if r['predicted'] == 1 else '❌ Negative',
                     'Matched Keywords': ', '.join(r['matched_keywords']) if r['matched_keywords'] else 'None',
                     'Score': r['score']
-                }
-                for r in st.session_state.classification_results
-            ])
+                })
+            
+            results_df = pd.DataFrame(results_data)
             
             st.dataframe(results_df, use_container_width=True)
             
@@ -449,9 +431,11 @@ def main():
                 # Charts
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.plotly_chart(create_metrics_chart(metrics), use_container_width=True)
+                    st.subheader("📊 Metrics Overview")
+                    create_metrics_chart(metrics)
                 with col2:
-                    st.plotly_chart(create_confusion_matrix_chart(metrics), use_container_width=True)
+                    st.subheader("🔢 Confusion Matrix")
+                    create_confusion_matrix_chart(metrics)
                 
                 # Confusion matrix summary
                 st.info(f"""
