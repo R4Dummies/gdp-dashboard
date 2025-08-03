@@ -117,7 +117,7 @@ st.sidebar.info(f"{len(dictionary)} keywords loaded")
 # Main – Classification & Results
 # ---------------------------------------------------------------------
 
-st.title("Dictionary Classification Bot")
+st.title("Dictionary Refinement Bot")
 
 if df.empty or not dictionary or text_col is None:
     st.info("➡️ Upload a CSV and enter at least one keyword to begin.")
