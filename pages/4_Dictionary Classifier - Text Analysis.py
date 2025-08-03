@@ -378,7 +378,11 @@ Nature: organic, natural, eco, green, sustainable, environment, earth""")
             with col2:
                 st.subheader("📋 Category Counts")
                 counts_df = category_counts.reset_index().rename(columns={'index': 'Category', 'Predicted_Category': 'Count'})
-                counts_df['Percentage'] = (counts_df['Count'] / total_rows * 100).round(1)
+                # Fix percentage calculation with proper error handling
+                try:
+                    counts_df['Percentage'] = (counts_df['Count'].astype(float) / total_rows * 100).round(1)
+                except:
+                    counts_df['Percentage'] = 0.0
                 st.dataframe(counts_df, use_container_width=True)
         
         # Filter results
