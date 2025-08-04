@@ -385,8 +385,70 @@ Nature: organic, natural, eco, green, sustainable, environment, earth""")
                     counts_df['Percentage'] = 0.0
                 st.dataframe(counts_df, use_container_width=True)
         
-        # Filter results
-        st.subheader("🔍 Filter Results")
+        # Download and Filter section
+        st.subheader("📥 Download & Filter Results")
+        
+        # Download buttons row
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # Generate timestamp for filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        with col1:
+            # Download All Results as CSV
+            csv_data = export_results_csv(st.session_state.result_df)
+            st.download_button(
+                label="📄 Download All (CSV)",
+                data=csv_data,
+                file_name=f'all_results_{timestamp}.csv',
+                mime='text/csv',
+                use_container_width=True,
+                type="primary"
+            )
+        
+        with col2:
+            # Download All Results as Excel
+            excel_data = export_results_excel(st.session_state.result_df)
+            st.download_button(
+                label="📊 Download All (Excel)",
+                data=excel_data,
+                file_name=f'all_results_{timestamp}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                use_container_width=True
+            )
+        
+        with col3:
+            # Download only classified results
+            classified_df = st.session_state.result_df[st.session_state.result_df['Predicted_Category'].notna()]
+            if len(classified_df) > 0:
+                classified_csv = export_results_csv(classified_df)
+                st.download_button(
+                    label="✅ Download Classified",
+                    data=classified_csv,
+                    file_name=f'classified_results_{timestamp}.csv',
+                    mime='text/csv',
+                    use_container_width=True
+                )
+            else:
+                st.button("✅ No Classified Data", disabled=True, use_container_width=True)
+        
+        with col4:
+            # Download only unclassified results
+            unclassified_df = st.session_state.result_df[st.session_state.result_df['Predicted_Category'].isna()]
+            if len(unclassified_df) > 0:
+                unclassified_csv = export_results_csv(unclassified_df)
+                st.download_button(
+                    label="❌ Download Unclassified",
+                    data=unclassified_csv,
+                    file_name=f'unclassified_results_{timestamp}.csv',
+                    mime='text/csv',
+                    use_container_width=True
+                )
+            else:
+                st.button("❌ No Unclassified Data", disabled=True, use_container_width=True)
+        
+        # Filter options
+        st.write("**Filter Display Options:**")
         col1, col2, col3 = st.columns(3)
         
         with col1:
