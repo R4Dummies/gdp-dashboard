@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import json
 
-st.title("🧠 Dictionary Classifier App")
+st.title("👽☠️😎🔥 Dictionary Classifier App")
 st.markdown("""
 Upload a CSV, select the column with text, and input your dictionary as either JSON or lines like:
 `Luxury: elegant, timeless, classic`.
