@@ -1,174 +1,400 @@
 import streamlit as st
 import pandas as pd
+import io
 import json
 
-st.title("🧠 Dictionary Classifier App")
-st.markdown("""
-Upload a CSV, select the column with text, and input your dictionary as either JSON or lines like:
-`Luxury: elegant, timeless, classic`.
-Then run the analysis to get category predictions based on keyword matches.
-""")
+# Page configuration
+st.set_page_config(
+    page_title="Dictionary Classifier",
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Add example dictionary formats in sidebar
-with st.sidebar:
-    st.header("Dictionary Format Examples")
-    st.markdown("""
-    **Line Format:**
-    ```
-    Luxury: elegant, timeless, classic
-    Budget: cheap, affordable, value
-    Sport: athletic, performance, active
-    ```
+# Custom CSS for Green and Gold theme
+st.markdown("""
+<style>
+    /* Main background */
+    .stApp {
+        background: linear-gradient(135deg, #f4f7f0 0%, #e8f5e8 100%);
+    }
     
+    /* Header styling */
+    .main-header {
+        background: linear-gradient(90deg, #2d5016, #4a7c23);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(45, 80, 22, 0.2);
+    }
+    
+    .main-header h1 {
+        color: #ffd700;
+        text-align: center;
+        margin: 0;
+        font-size: 2.5rem;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .main-header p {
+        color: #f0f8e8;
+        text-align: center;
+        margin: 1rem 0 0 0;
+        font-size: 1.1rem;
+    }
+    
+    /* Sidebar styling */
+    .css-1d391kg {
+        background: linear-gradient(180deg, #2d5016, #4a7c23);
+    }
+    
+    /* Custom containers */
+    .green-container {
+        background: linear-gradient(135deg, #e8f5e8, #f0f8e8);
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 5px solid #4a7c23;
+        margin: 1rem 0;
+        box-shadow: 0 2px 10px rgba(74, 124, 35, 0.1);
+    }
+    
+    .gold-container {
+        background: linear-gradient(135deg, #fffbf0, #fff8e1);
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 5px solid #ffd700;
+        margin: 1rem 0;
+        box-shadow: 0 2px 10px rgba(255, 215, 0, 0.2);
+    }
+    
+    /* Button styling */
+    .stButton > button {
+        background: linear-gradient(45deg, #4a7c23, #2d5016);
+        color: #ffd700;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 2rem;
+        font-weight: bold;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(45, 80, 22, 0.3);
+    }
+    
+    .stButton > button:hover {
+        background: linear-gradient(45deg, #2d5016, #1a2e0d);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(45, 80, 22, 0.4);
+    }
+    
+    /* Download button */
+    .stDownloadButton > button {
+        background: linear-gradient(45deg, #ffd700, #daa520);
+        color: #2d5016;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 2rem;
+        font-weight: bold;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+    }
+    
+    .stDownloadButton > button:hover {
+        background: linear-gradient(45deg, #daa520, #b8860b);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
+    }
+    
+    /* File uploader */
+    .stFileUploader > div > div {
+        background: linear-gradient(135deg, #f0f8e8, #e8f5e8);
+        border: 2px dashed #4a7c23;
+        border-radius: 10px;
+    }
+    
+    /* Text area */
+    .stTextArea > div > div > textarea {
+        background: #f9fdf9;
+        border: 2px solid #4a7c23;
+        border-radius: 8px;
+    }
+    
+    /* Success messages */
+    .stSuccess {
+        background: linear-gradient(135deg, #d4edda, #c3e6cb);
+        border: 1px solid #4a7c23;
+        color: #2d5016;
+    }
+    
+    /* Error messages */
+    .stError {
+        background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+        border: 1px solid #dc3545;
+    }
+    
+    /* Metrics styling */
+    .metric-container {
+        background: linear-gradient(135deg, #fffbf0, #fff8e1);
+        padding: 1rem;
+        border-radius: 8px;
+        border: 2px solid #ffd700;
+        text-align: center;
+        margin: 0.5rem;
+    }
+    
+    /* Info box */
+    .info-box {
+        background: linear-gradient(135deg, #e8f5e8, #f0f8e8);
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #4a7c23;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header
+st.markdown("""
+<div class="main-header">
+    <h1>🧠 Dictionary Classifier App</h1>
+    <p>Upload your dataset, customize your classification dictionary, and get intelligent category predictions</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Sidebar for instructions
+with st.sidebar:
+    st.markdown("### 📋 Instructions")
+    st.markdown("""
+    **Step 1:** Upload your CSV file  
+    **Step 2:** Select the text column  
+    **Step 3:** Customize your dictionary  
+    **Step 4:** Run the analysis  
+    **Step 5:** Download results  
+    """)
+    
+    st.markdown("### 💡 Dictionary Format")
+    st.markdown("""
     **JSON Format:**
     ```json
     {
-        "Luxury": ["elegant", "timeless", "classic"],
-        "Budget": ["cheap", "affordable", "value"]
+        "Luxury": ["elegant", "premium"],
+        "Sport": ["athletic", "fitness"]
     }
+    ```
+    
+    **Line Format:**
+    ```
+    Luxury: elegant, premium, sophisticated
+    Sport: athletic, fitness, performance
     ```
     """)
 
-uploaded_file = st.file_uploader("📁 Upload CSV", type="csv")
+# Main content
+col1, col2 = st.columns([2, 1])
 
-if uploaded_file:
+with col1:
+    st.markdown('<div class="green-container">', unsafe_allow_html=True)
+    st.markdown("### 📁 Upload Your Dataset")
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type="csv",
+        help="Upload a CSV file containing text data for classification"
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Initialize session state
+if 'df_loaded' not in st.session_state:
+    st.session_state.df_loaded = None
+if 'result_df' not in st.session_state:
+    st.session_state.result_df = None
+
+# File processing
+if uploaded_file is not None:
     try:
-        df_loaded = pd.read_csv(uploaded_file)
-        st.success(f"CSV uploaded successfully! ({len(df_loaded)} rows, {len(df_loaded.columns)} columns)")
+        st.session_state.df_loaded = pd.read_csv(uploaded_file)
         
-        # Show data preview
-        with st.expander("Preview Data"):
-            st.dataframe(df_loaded.head())
+        with col2:
+            st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+            st.metric("📊 Rows", len(st.session_state.df_loaded))
+            st.metric("📋 Columns", len(st.session_state.df_loaded.columns))
+            st.markdown('</div>', unsafe_allow_html=True)
         
-        text_col = st.selectbox("Text Column:", df_loaded.columns)
+        st.success("✅ CSV uploaded successfully!")
         
-        # Show sample from selected column
-        if text_col:
-            st.write("**Sample texts:**")
-            sample_texts = df_loaded[text_col].dropna().head(3)
-            for i, text in enumerate(sample_texts, 1):
-                st.text(f"{i}. {str(text)[:150]}{'...' if len(str(text)) > 150 else ''}")
-        
-        dict_input = st.text_area(
-            "Dictionary:",
-            value='Luxury: elegant, timeless, refined, classic, sophisticated, luxury, polished\nBudget: cheap, affordable, economical, budget, value, inexpensive',
-            height=100,
-            help='Enter JSON or lines like "Category: keyword1, keyword2, ..."'
+        # Display data preview
+        st.markdown('<div class="gold-container">', unsafe_allow_html=True)
+        st.markdown("### 👀 Data Preview")
+        st.dataframe(
+            st.session_state.df_loaded.head(),
+            use_container_width=True,
+            hide_index=True
         )
+        st.markdown('</div>', unsafe_allow_html=True)
         
-        # Preview parsed dictionary
-        if dict_input.strip():
-            dict_text = dict_input.strip()
-            categories = {}
+        # Column selection and dictionary input
+        col3, col4 = st.columns([1, 2])
+        
+        with col3:
+            st.markdown('<div class="green-container">', unsafe_allow_html=True)
+            st.markdown("### 🎯 Select Text Column")
+            text_col = st.selectbox(
+                "Choose the column containing text to classify:",
+                st.session_state.df_loaded.columns,
+                help="Select the column that contains the text you want to classify"
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown('<div class="green-container">', unsafe_allow_html=True)
+            st.markdown("### 📚 Classification Dictionary")
             
-            # Try JSON first
-            try:
-                parsed = json.loads(dict_text)
-                if isinstance(parsed, dict):
-                    for k, v in parsed.items():
-                        if isinstance(v, str):
-                            v = [v]
-                        categories[k] = [str(x).strip() for x in v]
-            except:
-                # Try line format
-                for line in dict_text.splitlines():
-                    if ':' in line:
-                        cat, terms = line.split(':', 1)
-                        categories[cat.strip()] = [w.strip() for w in terms.split(',') if w.strip()]
+            # Default dictionary options
+            default_options = {
+                "Luxury Products": "Luxury: elegant, timeless, refined, classic, sophisticated, luxury, polished, premium, exclusive, high-end",
+                "Technology": "Technology: digital, software, tech, innovation, smart, automated, AI, machine learning, data, cloud",
+                "Health & Fitness": "Health: wellness, fitness, healthy, nutrition, exercise, medical, healthcare, therapy, treatment, recovery",
+                "Custom": ""
+            }
             
-            if categories:
-                st.write("**Dictionary Preview:**")
-                for cat, words in categories.items():
-                    st.write(f"• **{cat}**: {', '.join(words[:8])}{'...' if len(words) > 8 else ''}")
+            preset_choice = st.selectbox(
+                "Choose a preset dictionary or create custom:",
+                list(default_options.keys())
+            )
+            
+            if preset_choice != "Custom":
+                default_dict = default_options[preset_choice]
             else:
-                st.warning("⚠️ Dictionary format not recognized. Check the sidebar for examples.")
+                default_dict = 'Luxury: elegant, timeless, refined, classic, sophisticated, luxury, polished'
+            
+            dict_input = st.text_area(
+                "Dictionary (JSON or line format):",
+                value=default_dict,
+                height=150,
+                help='Enter JSON format or lines like "Category: keyword1, keyword2, ..."'
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
         
-        col1, col2 = st.columns([1, 3])
+        # Analysis button
+        st.markdown('<div style="text-align: center; margin: 2rem 0;">', unsafe_allow_html=True)
+        if st.button("🔍 Run Classification Analysis", use_container_width=True):
+            with st.spinner("🔄 Processing your data..."):
+                dict_text = dict_input.strip()
+                categories = {}
+                
+                # Parse dictionary
+                try:
+                    # Try JSON first
+                    parsed = json.loads(dict_text)
+                    if isinstance(parsed, dict):
+                        for k, v in parsed.items():
+                            if isinstance(v, str):
+                                v = [v]
+                            categories[k] = [str(x).strip() for x in v]
+                except:
+                    # Fall back to line format
+                    for line in dict_text.splitlines():
+                        if ':' in line:
+                            cat, terms = line.split(':', 1)
+                            categories[cat.strip()] = [w.strip() for w in terms.split(',') if w.strip()]
+                
+                if not categories:
+                    st.error("❌ Invalid dictionary format. Please check the sidebar for examples.")
+                else:
+                    # Perform classification
+                    results = []
+                    confidence_scores = []
+                    
+                    for txt in st.session_state.df_loaded[text_col].astype(str):
+                        txt_l = txt.lower()
+                        best_cat, max_count = None, 0
+                        total_words = len(txt_l.split())
+                        
+                        for cat, words in categories.items():
+                            count = sum(txt_l.count(w.lower()) for w in words if w)
+                            if count > max_count:
+                                best_cat, max_count = cat, count
+                        
+                        results.append(best_cat)
+                        confidence_scores.append(max_count / max(total_words, 1) if total_words > 0 else 0)
+                    
+                    # Create results dataframe
+                    st.session_state.result_df = st.session_state.df_loaded.copy()
+                    st.session_state.result_df['Predicted_Category'] = results
+                    st.session_state.result_df['Confidence_Score'] = [round(score, 3) for score in confidence_scores]
+                    
+                    st.success("✅ Classification complete!")
+        st.markdown('</div>', unsafe_allow_html=True)
         
-        with col1:
-            run_button = st.button("🔍 Run Analysis", type="primary")
-        
-        if run_button:
-            if not categories:
-                st.error("❌ Invalid dictionary format.")
-            else:
-                # Add progress bar
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                results = []
-                texts = df_loaded[text_col].astype(str)
-                total = len(texts)
-                
-                for i, txt in enumerate(texts):
-                    txt_l = txt.lower()
-                    best_cat, max_count = None, 0
-                    
-                    for cat, words in categories.items():
-                        count = sum(txt_l.count(w.lower()) for w in words if w)
-                        if count > max_count:
-                            best_cat, max_count = cat, count
-                    
-                    results.append(best_cat)
-                    
-                    # Update progress
-                    if i % max(1, total // 100) == 0 or i == total - 1:
-                        progress_bar.progress((i + 1) / total)
-                        status_text.text(f"Processing {i + 1}/{total} texts...")
-                
-                result_df = df_loaded.copy()
-                result_df['Predicted_Category'] = results
-                
-                progress_bar.empty()
-                status_text.empty()
-                
-                # Show results summary
-                classified_count = result_df['Predicted_Category'].notna().sum()
-                st.success(f"✅ Analysis complete! {classified_count}/{len(result_df)} texts classified")
-                
-                # Category distribution
-                if classified_count > 0:
-                    category_counts = result_df['Predicted_Category'].value_counts()
-                    col1, col2 = st.columns([1, 1])
-                    
-                    with col1:
-                        st.write("**Category Distribution:**")
-                        for cat, count in category_counts.items():
-                            percentage = (count / classified_count) * 100
-                            st.write(f"• {cat}: {count} ({percentage:.1f}%)")
-                    
-                    with col2:
-                        st.bar_chart(category_counts)
-                
-                # Sample results
-                st.write("**Sample Results:**")
-                sample_df = result_df[[text_col, 'Predicted_Category']].head(10)
-                st.dataframe(sample_df, use_container_width=True)
-                
-                # Download buttons
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    csv = result_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="💾 Download All Results",
-                        data=csv,
-                        file_name='classification_results.csv',
-                        mime='text/csv'
-                    )
-                
-                with col2:
-                    # Only classified results
-                    classified_df = result_df[result_df['Predicted_Category'].notna()]
-                    if len(classified_df) > 0:
-                        csv_classified = classified_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="✅ Download Classified Only",
-                            data=csv_classified,
-                            file_name='classification_results_classified.csv',
-                            mime='text/csv'
-                        )
-                
+        # Results display
+        if st.session_state.result_df is not None:
+            st.markdown('<div class="gold-container">', unsafe_allow_html=True)
+            st.markdown("### 📈 Classification Results")
+            
+            # Summary metrics
+            col5, col6, col7, col8 = st.columns(4)
+            
+            category_counts = st.session_state.result_df['Predicted_Category'].value_counts()
+            avg_confidence = st.session_state.result_df['Confidence_Score'].mean()
+            unclassified = (st.session_state.result_df['Predicted_Category'].isna().sum())
+            
+            with col5:
+                st.metric("📊 Total Classified", len(st.session_state.result_df) - unclassified)
+            with col6:
+                st.metric("❓ Unclassified", unclassified)
+            with col7:
+                st.metric("🎯 Categories Found", len(category_counts))
+            with col8:
+                st.metric("📏 Avg Confidence", f"{avg_confidence:.3f}")
+            
+            # Category breakdown
+            if len(category_counts) > 0:
+                st.markdown("#### 📋 Category Breakdown")
+                breakdown_df = pd.DataFrame({
+                    'Category': category_counts.index,
+                    'Count': category_counts.values,
+                    'Percentage': [f"{(count/len(st.session_state.result_df)*100):.1f}%" 
+                                 for count in category_counts.values]
+                })
+                st.dataframe(breakdown_df, use_container_width=True, hide_index=True)
+            
+            # Sample results
+            st.markdown("#### 🔍 Sample Results")
+            display_df = st.session_state.result_df[[text_col, 'Predicted_Category', 'Confidence_Score']].head(10)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Download button
+            csv = st.session_state.result_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="💾 Download Complete Results",
+                data=csv,
+                file_name='classification_results.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
+            st.markdown('</div>', unsafe_allow_html=True)
+            
     except Exception as e:
-        st.error(f"❌ Error loading CSV: {e}")
-        st.info("Please ensure your CSV file is properly formatted and try uploading again.")
+        st.error(f"❌ Error loading CSV: {str(e)}")
+else:
+    # Instructions when no file is uploaded
+    st.markdown('<div class="info-box">', unsafe_allow_html=True)
+    st.markdown("""
+    ### 🚀 Getting Started
+    
+    1. **Upload your CSV file** using the file uploader above
+    2. **Select the text column** you want to classify
+    3. **Choose or customize your dictionary** with relevant keywords for each category
+    4. **Run the analysis** to get predictions for each row
+    5. **Download the results** with predicted categories and confidence scores
+    
+    The app uses keyword matching to classify text into categories based on your custom dictionary.
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #4a7c23; font-size: 0.9rem;">
+    🧠 Dictionary Classifier App | Built with Streamlit | Green & Gold Theme
+</div>
+""", unsafe_allow_html=True)
