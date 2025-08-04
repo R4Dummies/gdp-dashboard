@@ -1,4 +1,31 @@
-import streamlit as st
+with col3:
+            # Download filtered results
+            if show_category != "All" or show_rows != "All":
+                # Apply the same filters to create download data
+                download_df = st.session_state.result_df.copy()
+                
+                if show_category != "All":
+                    if show_category == "Unclassified":
+                        download_df = download_df[download_df['Predicted_Category'].isna()]
+                    else:
+                        download_df = download_df[download_df['Predicted_Category'] == show_category]
+                
+                if show_rows != "All":
+                    download_df = download_df.head(show_rows)
+                
+                if len(download_df) > 0:
+                    filtered_csv = export_results_csv(download_df)
+                    st.download_button(
+                        label="🔍 Download Filtered",
+                        data=filtered_csv,
+                        file_name=f'filtered_results_{timestamp}.csv',
+                        mime='text/csv',
+                        use_container_width=True
+                    )
+                else:
+                    st.button("🔍 No Filtered Data", disabled=True, use_container_width=True)
+            else:
+                st.write("*Apply filters to enable filtered download*")import streamlit as st
 import pandas as pd
 import json
 import io
@@ -52,10 +79,14 @@ def export_results_csv(df):
 
 def export_results_excel(df):
     """Export results as Excel"""
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Classification Results')
-    return output.getvalue()
+    try:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Classification Results')
+        return output.getvalue()
+    except ImportError:
+        # If openpyxl is not available, return None
+        return None
 
 def export_dictionary_json(categories):
     """Export dictionary as JSON"""
@@ -104,15 +135,21 @@ def main():
                 use_container_width=True
             )
             
-            # Excel Download
-            excel_data = export_results_excel(st.session_state.result_df)
-            st.download_button(
-                label="📊 Download Excel",
-                data=excel_data,
-                file_name=f'classification_results_{timestamp}.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                use_container_width=True
-            )
+            # Excel Download (only if openpyxl is available)
+            try:
+                excel_data = export_results_excel(st.session_state.result_df)
+                if excel_data is not None:
+                    st.download_button(
+                        label="📊 Download Excel",
+                        data=excel_data,
+                        file_name=f'classification_results_{timestamp}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True
+                    )
+                else:
+                    st.info("📊 Excel export unavailable (install openpyxl)")
+            except Exception:
+                st.info("📊 Excel export unavailable (install openpyxl)")
         
         # Dictionary export
         if st.session_state.categories:
@@ -407,15 +444,23 @@ Nature: organic, natural, eco, green, sustainable, environment, earth""")
             )
         
         with col2:
-            # Download All Results as Excel
-            excel_data = export_results_excel(st.session_state.result_df)
-            st.download_button(
-                label="📊 Download All (Excel)",
-                data=excel_data,
-                file_name=f'all_results_{timestamp}.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                use_container_width=True
-            )
+            # Download All Results as Excel (with error handling)
+            try:
+                excel_data = export_results_excel(st.session_state.result_df)
+                if excel_data is not None:
+                    st.download_button(
+                        label="📊 Download All (Excel)",
+                        data=excel_data,
+                        file_name=f'all_results_{timestamp}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True
+                    )
+                else:
+                    st.button("📊 Excel Unavailable", disabled=True, use_container_width=True, 
+                             help="Install openpyxl: pip install openpyxl")
+            except Exception:
+                st.button("📊 Excel Unavailable", disabled=True, use_container_width=True,
+                         help="Install openpyxl: pip install openpyxl")
         
         with col3:
             # Download only classified results
